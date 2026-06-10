@@ -55,4 +55,5 @@ Development log for BongoWaifu Bridge. Newest entries at the bottom.
 
 - New trigger: when the `hot` gauge (0–100) reaches ≥99, a dedicated max-excitement line fires once (re-arms after the gauge drops below 80). Tier-up lines are suppressed while maxed.
 - Max event didn't fire in testing: gauge decays ~0.556/s so a momentary 100 can dip below 99 between 2s polls. Threshold lowered to 97, re-arm at <75, and a `gauge debug` log (raw gauges JSON) prints when ≥90 to verify the actual field names.
+- She kept saying "bridge" after connecting — the greet event text mentioned "started the bridge", and the model echoed it (event memos also persist in memory, reinforcing it). Greet text reworded to remove meta words, with an explicit "don't mention any system/app/connection" note.
 - Summary prompt now also preserves facts the character invented about herself (job, hobbies, anecdotes), not just facts about the user — keeps her self-made lore consistent across sessions.
