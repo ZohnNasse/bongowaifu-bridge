@@ -417,9 +417,37 @@ async function genAsk(state, topic) {
 }
 
 // ─────────── 발화 동작 ───────────
+// 긴 텍스트를 문장 경계에서 잘라 말풍선으로 분할 — 답변 길이에 따라 유연하게 (안전 상한 8개)
+function splitBubbles(text, max = 110, maxParts = 8) {
+  const parts = [];
+  let rest = String(text).trim();
+  while (rest && parts.length < maxParts) {
+    if (rest.length <= max) { parts.push(rest); break; }
+    const slice = rest.slice(0, max);
+    let cut = Math.max(
+      slice.lastIndexOf('. '), slice.lastIndexOf('! '), slice.lastIndexOf('? '),
+      slice.lastIndexOf('…'), slice.lastIndexOf('~'), slice.lastIndexOf(', '), slice.lastIndexOf(' '),
+    );
+    if (cut < 40) cut = max - 1; // 적당한 경계 없으면 그냥 자름
+    parts.push(rest.slice(0, cut + 1).trim());
+    rest = rest.slice(cut + 1).trim();
+  }
+  return parts.filter(Boolean);
+}
+
+// 분할 발화: 앞 말풍선을 읽을 시간을 주고 다음 전송
+async function sayBubbles(text) {
+  const parts = splitBubbles(text);
+  for (let i = 0; i < parts.length; i++) {
+    await mcp.say(parts[i]);
+    if (i < parts.length - 1)
+      await new Promise(r => setTimeout(r, 2000 + parts[i].length * 35));
+  }
+}
+
 async function speak(state, event, tag) {
   const line = await genLine(state, event);
-  await mcp.say(line);
+  await sayBubbles(line);
   addMemory('event', event);
   addMemory('waifu', line);
   lastSpoke = Date.now();
@@ -581,11 +609,11 @@ ipcMain.handle('chat:send', async (_, text) => {
     let state = {};
     if (mcp) { try { state = await mcp.state(['character']); } catch {} }
     const msgs = [{ role: 'system', content: sysPrompt(state) }, ...histMsgs()];
-    const reply = cleanLine(await llama(msgs, Math.max(+settings.maxTokens || 0, 300)), 200);
+    const reply = cleanLine(await llama(msgs, Math.max(+settings.maxTokens || 0, 300)), 600);
     if (!reply) return { ok: false, error: 'empty reply from model (raise max tokens or disable reasoning/think mode)' };
     addMemory('waifu', reply);
     lastSpoke = Date.now();
-    if (mcp) { try { await mcp.say(reply); } catch {} }
+    if (mcp) { try { await sayBubbles(reply); } catch {} } // 길면 말풍선 2~3개로 분할
     return { ok: true, reply };
   } catch (e) {
     return { ok: false, error: e.message };
@@ -596,7 +624,7 @@ ipcMain.handle('chat:send', async (_, text) => {
 ipcMain.handle('say:manual', async (_, text) => {
   if (!mcp) return { ok: false, error: 'not connected' };
   try {
-    await mcp.say(text);
+    await sayBubbles(text);
     addMemory('waifu', text);
     lastSpoke = Date.now();
     log('say', `[manual] ${text}`);

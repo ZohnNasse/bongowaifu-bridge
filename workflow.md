@@ -79,4 +79,8 @@ Development log for BongoWaifu Bridge. Newest entries at the bottom.
 
 - Added `persona.md` support: a user-authored character sheet (basics, physical traits, personality-as-behavior, likes/dislikes, backstory, speech habits, example lines, never-do list) in the userData folder. When present, it's injected into the system prompt as [CHARACTER SHEET] (capped 4k chars), taking precedence over the basic settings fields; read on every line so edits apply immediately.
 - `persona.md.example` template ships in the repo (bilingual annotations). Settings memory view shows the persona path and whether one is active. Distinct from memory.md's Character Lore: persona.md = authored identity, Lore = emergent self-made facts.
+
+## 2026-06-10 — Multi-bubble speech
+
+- Long replies are now split at sentence boundaries into multiple speech bubbles (~110 chars each), sent sequentially with reading-time delays (2s + 35ms/char). Bubble count scales with reply length (safety cap 8). Applies to chat replies (cap raised to 600 chars), manual speak, and auto lines.
 - Summary prompt now also preserves facts the character invented about herself (job, hobbies, anecdotes), not just facts about the user — keeps her self-made lore consistent across sessions.
