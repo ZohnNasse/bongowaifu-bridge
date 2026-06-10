@@ -48,6 +48,15 @@ const DEFAULTS = {
 
 let settings = { ...DEFAULTS };
 let memory = { recent: [], summary: '' };
+let askKeys = { textKey: 'text', optKey: 'options' }; // 연결 시 실제 스키마로 갱신
+
+function pickAskKeys(def) {
+  const props = Object.keys(def?.inputSchema?.properties || {});
+  return {
+    textKey: props.find(p => /^(text|question|message|prompt)$/i.test(p)) || 'text',
+    optKey:  props.find(p => /^(options|buttons|choices|answers)$/i.test(p)) || 'options',
+  };
+}
 
 // ─────────── 다국어 프롬프트 ───────────
 const STR = {
@@ -159,7 +168,7 @@ class MCP {
 
   async tools() {
     const o = await this.rpc('tools/list', {});
-    return (o?.result?.tools || []).map(t => t.name);
+    return o?.result?.tools || []; // 전체 정의(스키마 포함) 반환
   }
 
   async call(name, args) {
@@ -170,8 +179,10 @@ class MCP {
 
   say(text) { return this.call('say', { text: String(text).slice(0, 120) }); }
 
-  // 주의: ask_and_wait 인자명은 문서 미기재 — 오류 시 {question, choices} 등으로 바꿔볼 것
-  ask(text, options) { return this.call('ask_and_wait', { text, options }); }
+  // ask_and_wait 인자명은 연결 시 읽은 실제 스키마(askKeys)를 따름
+  ask(text, options) {
+    return this.call('ask_and_wait', { [askKeys.textKey]: text, [askKeys.optKey]: options });
+  }
 
   async state(sections) {
     const r = await this.call('get_game_state', { sections });
@@ -378,9 +389,14 @@ async function start() {
   mcp = new MCP(`http://127.0.0.1:${settings.bongoPort}/mcp`);
   try {
     await mcp.init();
-    const tools = await mcp.tools();
-    log('info', `connected. tools: ${tools.join(', ')}`);
-    if (!tools.includes('say')) throw new Error('no say tool — check AI Connection toggle in game');
+    const toolDefs = await mcp.tools();
+    const names = toolDefs.map(t => t.name);
+    log('info', `connected. tools: ${names.join(', ')}`);
+    if (!names.includes('say')) throw new Error('no say tool — check AI Connection toggle in game');
+    // ask_and_wait 실제 인자 스키마 확인
+    const askDef = toolDefs.find(t => t.name === 'ask_and_wait');
+    askKeys = pickAskKeys(askDef);
+    log('info', `ask_and_wait schema: ${JSON.stringify(Object.keys(askDef?.inputSchema?.properties || {}))} -> using {${askKeys.textKey}, ${askKeys.optKey}}`);
   } catch (e) {
     mcp = null;
     return { ok: false, error: e.message };
