@@ -9,6 +9,7 @@ let running = false;
 let busy = false;            // LLM/ask 중복 호출 방지
 let mcp = null;
 let lastHotLevel = 0;
+let hotFull = false;       // 게이지 만땅 이벤트 1회 발화용
 let seenAchv = new Set();
 let lastSpoke = 0;
 let sessionStart = 0;
@@ -78,10 +79,11 @@ const STR = {
 3. AI나 설정의 존재를 언급하지 않고 끝까지 ${S.personaName}(으)로 산다.`,
     lineInstr: e => `(상황: ${e}) 이 상황에 맞는 짧은 대사 한 줄.`,
     askInstr: t => `(상황: ${t}) 사용자에게 물어볼 짧은 질문 1개와 선택지 2~4개를 만들어 JSON만 출력: {"text":"질문","options":["선택1","선택2"]}`,
-    sumSys: '다음 대화 기록을 기존 요약과 합쳐 한국어 5문장 이내로 요약하라. 사용자에 대한 사실(이름, 취향, 한 일, 약속)을 우선 보존. 요약문만 출력.',
+    sumSys: '다음 대화 기록을 기존 요약과 합쳐 한국어 6문장 이내로 요약하라. 사용자에 대한 사실(이름, 취향, 한 일, 약속)과 캐릭터가 스스로 말한 자기 설정(직장, 취미, 경험담 등)을 우선 보존 — 캐릭터 설정의 일관성에 필요하다. 요약문만 출력.',
     sumUser: (old, txt) => `기존 요약:\n${old || '(없음)'}\n\n새 기록:\n${txt}`,
     evGreet: '사용자가 막 자리에 앉아 브릿지를 켰다. 시간대에 맞는 인사를 건넨다.',
     evHot: l => `콤보 게이지가 레벨 ${l}로 올랐다. 신나게 반응한다.`,
+    evHotMax: '콤보 게이지가 완전히 가득 찼다! 최고조 텐션으로 반응한다.',
     evAchv: n => `새 업적 '${n}' 달성. 축하하거나 장난친다.`,
     evIdle: '한동안 조용했다. 가벼운 잡담 한 마디.',
     evAskIdle: '한동안 조용했다. 사용자 근황이나 기분, 휴식 여부 등을 가볍게 묻는다.',
@@ -108,10 +110,11 @@ const STR = {
 3. Never mention being an AI or having settings. Stay ${S.personaName} at all times.`,
     lineInstr: e => `(Situation: ${e}) One short line fitting this situation.`,
     askInstr: t => `(Situation: ${t}) Create 1 short question for the user with 2-4 button options. Output JSON only: {"text":"question","options":["opt1","opt2"]}`,
-    sumSys: 'Merge the following conversation log into the existing summary, max 5 English sentences. Prioritize facts about the user (name, preferences, things done, promises). Output the summary only.',
+    sumSys: 'Merge the following conversation log into the existing summary, max 6 English sentences. Prioritize facts about the user (name, preferences, things done, promises) AND facts the character stated about herself (job, hobbies, anecdotes) — needed for character consistency. Output the summary only.',
     sumUser: (old, txt) => `Existing summary:\n${old || '(none)'}\n\nNew log:\n${txt}`,
     evGreet: 'The user just sat down and started the bridge. Greet them appropriately for the time of day.',
     evHot: l => `The combo gauge just rose to level ${l}. React excitedly.`,
+    evHotMax: 'The combo gauge is completely maxed out! React at peak excitement.',
     evAchv: n => `New achievement '${n}' unlocked. Congratulate or tease.`,
     evIdle: 'It has been quiet for a while. Drop a light bit of small talk.',
     evAskIdle: 'It has been quiet for a while. Casually ask how the user is doing, their mood, or whether they need a break.',
@@ -376,11 +379,16 @@ async function tick() {
   try {
     const state = await mcp.state(['character', 'gauges', 'achievements']);
 
-    // 게이지 티어 상승
+    // 게이지 티어 상승 / 만땅
     const hot = state?.gauges?.hot_level ?? 0;
-    if (settings.trigHot && hot > lastHotLevel) {
+    const hotVal = state?.gauges?.hot ?? 0;       // 0..100
+    if (settings.trigHot && hotVal >= 99 && !hotFull) {
+      hotFull = true;
+      await speak(state, L().evHotMax, 'hotmax'); // 만땅은 별도 이벤트 (재발화는 80 미만으로 떨어진 뒤)
+    } else if (settings.trigHot && hot > lastHotLevel && !hotFull) {
       await speak(state, L().evHot(hot), `hot${hot}`);
     }
+    if (hotVal < 80) hotFull = false;
     lastHotLevel = hot;
 
     // 신규 업적
@@ -430,6 +438,7 @@ async function start() {
   sessionStart = Date.now();
   lastSpoke = Date.now();
   lastHotLevel = 0;
+  hotFull = false;
 
   // 기존 업적 베이스라인
   try {
