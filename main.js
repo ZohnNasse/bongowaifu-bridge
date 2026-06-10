@@ -18,6 +18,7 @@ let sessionStart = 0;
 const SETTINGS_PATH = () => path.join(app.getPath('userData'), 'settings.json');
 const MEMORY_PATH   = () => path.join(app.getPath('userData'), 'memory.json');
 const MEMMD_PATH    = () => path.join(app.getPath('userData'), 'memory.md');
+const PERSONA_PATH  = () => path.join(app.getPath('userData'), 'persona.md');
 
 const DEFAULTS = {
   // 언어 ('ko' | 'en') — UI와 캐릭터 발화 언어
@@ -62,6 +63,11 @@ function setMood(m) { mood = m; }
 let memMd = '';
 function loadMd() { try { memMd = fs.readFileSync(MEMMD_PATH(), 'utf8'); } catch { memMd = ''; } }
 function saveMd() { try { fs.writeFileSync(MEMMD_PATH(), memMd); } catch {} }
+
+// persona.md — 사용자가 작성한 캐릭터 시트 (매 발화마다 읽어 수정 즉시 반영)
+function loadPersonaMd() {
+  try { return fs.readFileSync(PERSONA_PATH(), 'utf8').trim(); } catch { return ''; }
+}
 
 function parseMd(s) {
   const get = h => {
@@ -362,8 +368,18 @@ function sysPrompt(state) {
   });
   const locale = settings.language === 'en' ? 'en-US' : 'ko-KR';
   const aff = Math.round(+memory.affection || 30);
-  return L().sys(settings, chJson, now.toLocaleString(locale), mins, memForPrompt(),
-                 aff, L().affTier(aff), L().moods[mood] || L().moods.neutral);
+  let sys = L().sys(settings, chJson, now.toLocaleString(locale), mins, memForPrompt(),
+                    aff, L().affTier(aff), L().moods[mood] || L().moods.neutral);
+  // persona.md가 있으면 [규칙] 앞에 인물 상세로 삽입 (기본 설정보다 우선)
+  const pmd = loadPersonaMd();
+  if (pmd) {
+    const marker = settings.language === 'en' ? '[RULES]' : '[규칙]';
+    const head = settings.language === 'en'
+      ? '[CHARACTER SHEET — detailed; takes precedence over the profile above]'
+      : '[인물 상세 — 위 설정보다 우선]';
+    sys = sys.replace(marker, `${head}\n${pmd.slice(0, 4000)}\n\n${marker}`);
+  }
+  return sys;
 }
 
 async function genLine(state, event) {
@@ -601,7 +617,10 @@ ipcMain.handle('ask:manual', async () => {
   finally { busy = false; }
 });
 
-ipcMain.handle('memory:get', () => ({ ...memory, md: memMd, mdPath: MEMMD_PATH() }));
+ipcMain.handle('memory:get', () => ({
+  ...memory, md: memMd, mdPath: MEMMD_PATH(),
+  personaPath: PERSONA_PATH(), hasPersona: !!loadPersonaMd(),
+}));
 ipcMain.handle('memory:clear', () => {
   memory = { recent: [], summary: '', affection: 30, lastTs: Date.now() };
   memMd = '';

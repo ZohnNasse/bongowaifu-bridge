@@ -317,7 +317,8 @@ $('btnMemRefresh').onclick = async () => {
   const m = await window.api.getMemory();
   $('memSummaryView').textContent =
     '♥ ' + (m.affection ?? 30) + '/100\n' +
-    'memory.md: ' + m.mdPath + '\n\n' +
+    'memory.md: ' + m.mdPath + '\n' +
+    'persona.md: ' + m.personaPath + (m.hasPersona ? ' ✓' : ' (없음/none — persona.md.example 참고)') + '\n\n' +
     (m.md || t('memNone')) + '\n' + t('memCount')(m.recent.length);
 };
 $('btnMemClear').onclick = async () => {

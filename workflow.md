@@ -74,4 +74,9 @@ Development log for BongoWaifu Bridge. Newest entries at the bottom.
 - On overflow, the model extracts JSON `{user_facts, character_lore, diary}` from old lines; facts/lore are deduped and appended, diary accumulates by date. Extraction failure restores the raw lines — never lossy.
 - Prompt injection is capped at ~6k chars: facts+lore always included, oldest diary entries dropped first (64k-context local models handle this comfortably).
 - Old `memory.summary` is auto-migrated into the diary. The memory view in Settings shows the md path + full content; users can hand-edit the file.
+
+## 2026-06-10 — persona.md character sheet
+
+- Added `persona.md` support: a user-authored character sheet (basics, physical traits, personality-as-behavior, likes/dislikes, backstory, speech habits, example lines, never-do list) in the userData folder. When present, it's injected into the system prompt as [CHARACTER SHEET] (capped 4k chars), taking precedence over the basic settings fields; read on every line so edits apply immediately.
+- `persona.md.example` template ships in the repo (bilingual annotations). Settings memory view shows the persona path and whether one is active. Distinct from memory.md's Character Lore: persona.md = authored identity, Lore = emergent self-made facts.
 - Summary prompt now also preserves facts the character invented about herself (job, hobbies, anecdotes), not just facts about the user — keeps her self-made lore consistent across sessions.
