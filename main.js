@@ -48,7 +48,14 @@ const DEFAULTS = {
 };
 
 let settings = { ...DEFAULTS };
-let memory = { recent: [], summary: '' };
+let memory = { recent: [], summary: '', affection: 30, lastTs: 0 }; // affection 0~100 영속
+let mood = 'neutral'; // 단기 기분: neutral|happy|excited|bored
+
+function bumpAff(d) {
+  memory.affection = Math.max(0, Math.min(100, (+memory.affection || 30) + d));
+  saveMemory();
+}
+function setMood(m) { mood = m; }
 let askKeys = { textKey: 'text', optKey: 'options' }; // 연결 시 실제 스키마로 갱신
 
 function pickAskKeys(def) {
@@ -62,7 +69,7 @@ function pickAskKeys(def) {
 // ─────────── 다국어 프롬프트 ───────────
 const STR = {
   ko: {
-    sys: (S, ch, timeStr, mins, summary) =>
+    sys: (S, ch, timeStr, mins, summary, aff, tier, moodLabel) =>
 `너는 '${S.personaName}'(이)라는 인물이 되어 연기한다. 아래 [설정]은 너만 아는 내부 가이드라인이다.
 
 [설정 — 절대 입 밖에 내지 말 것]
@@ -71,6 +78,8 @@ const STR = {
 - 말투: ${S.speechStyle}
 - 현재 시각 ${timeStr}, 사용자 연속 작업 ${mins}분째. 시간대 분위기 반영(새벽=건강 걱정, 아침=활기, 밤=차분), 2시간 넘으면 가끔 휴식 권유.
 - 게임 캐릭터 외형 ${ch} — 분위기만 살짝 반영(gothic=시크, cute/pink=애교, maid=주인님 호칭, summer=산뜻).
+- 사용자와의 관계: 호감도 ${aff}/100 (${tier}) — 거리감과 다정함을 여기에 맞춘다. 낮으면 데면데면, 높으면 적극적인 애정 표현.
+- 지금 기분: ${moodLabel} — 대사 톤에 자연스럽게 반영.
 - 이전 기억: ${summary || '(없음)'}
 
 [규칙]
@@ -91,9 +100,11 @@ const STR = {
     evReact: a => `사용자가 방금 질문에 '${a}'라고 답했다. 그에 맞게 반응한다.`,
     defOpts: ['응', '아니'],
     memCtx: e => `(상황 메모: ${e})`,
+    affTier: a => a < 20 ? '서먹한 사이' : a < 40 ? '아는 사이' : a < 60 ? '친한 사이' : a < 80 ? '애틋한 사이' : '연인 같은 사이',
+    moods: { neutral: '평온함', happy: '신남', excited: '들뜸', bored: '심심함' },
   },
   en: {
-    sys: (S, ch, timeStr, mins, summary) =>
+    sys: (S, ch, timeStr, mins, summary, aff, tier, moodLabel) =>
 `You are roleplaying as '${S.personaName}'. The [PROFILE] below is your private internal guideline.
 
 [PROFILE — never say any of this out loud]
@@ -102,6 +113,8 @@ const STR = {
 - Speech style: ${S.speechStyle}
 - Current time ${timeStr}; user working for ${mins} min straight. Reflect time of day (late night=worry, morning=energetic, evening=calm); past 2h occasionally suggest a break.
 - In-game look ${ch} — only subtly reflect the vibe (gothic=cool & terse, cute/pink=soft, maid=call them "master", summer=breezy).
+- Relationship: affection ${aff}/100 (${tier}) — match your warmth and distance to this. Low = reserved, high = openly affectionate.
+- Current mood: ${moodLabel} — let it color your tone naturally.
 - Past memory: ${summary || '(none)'}
 
 [RULES]
@@ -122,6 +135,8 @@ const STR = {
     evReact: a => `The user just answered '${a}' to your question. React accordingly.`,
     defOpts: ['Yes', 'No'],
     memCtx: e => `(context note: ${e})`,
+    affTier: a => a < 20 ? 'awkward strangers' : a < 40 ? 'acquaintances' : a < 60 ? 'close friends' : a < 80 ? 'affectionate' : 'like lovers',
+    moods: { neutral: 'calm', happy: 'happy', excited: 'thrilled', bored: 'bored' },
   },
 };
 const L = () => STR[settings.language] || STR.ko;
@@ -296,7 +311,9 @@ function sysPrompt(state) {
     skin: ch.current_skin, clothes: ch.current_clothes,
   });
   const locale = settings.language === 'en' ? 'en-US' : 'ko-KR';
-  return L().sys(settings, chJson, now.toLocaleString(locale), mins, memory.summary);
+  const aff = Math.round(+memory.affection || 30);
+  return L().sys(settings, chJson, now.toLocaleString(locale), mins, memory.summary,
+                 aff, L().affTier(aff), L().moods[mood] || L().moods.neutral);
 }
 
 async function genLine(state, event) {
@@ -366,6 +383,8 @@ async function doAsk(state, topic) {
     log('error', `ask_and_wait failed: ${e.message}`);
     return;
   }
+  bumpAff(answer.startsWith('(no answer') ? -1 : 2); // 답하면 +2, 무시하면 -1
+  setMood('neutral');
   addMemory('user', `(button) ${answer}`);
   log('answer', answer);
   // 답변에 대한 리액션
@@ -387,8 +406,10 @@ async function tick() {
     }
     if (settings.trigHot && hotVal >= 97 && !hotFull) {  // 폴링 간 감쇠 감안해 97로
       hotFull = true;
+      setMood('excited'); bumpAff(2);
       await speak(state, L().evHotMax, 'hotmax');
     } else if (settings.trigHot && hot > lastHotLevel && !hotFull) {
+      setMood('happy');
       await speak(state, L().evHot(hot), `hot${hot}`);
     }
     if (hotVal < 75) hotFull = false;                    // 75 미만으로 떨어지면 재무장
@@ -399,6 +420,7 @@ async function tick() {
       for (const a of state?.achievements || []) {
         if (a.unlocked && !seenAchv.has(a.api_name)) {
           seenAchv.add(a.api_name);
+          setMood('happy'); bumpAff(1);
           await speak(state, L().evAchv(a.display_name || a.api_name), 'achv');
         }
       }
@@ -406,6 +428,7 @@ async function tick() {
 
     // idle 잡담 / 질문
     if (settings.trigIdle && Date.now() - lastSpoke > settings.idleSec * 1000) {
+      setMood('bored'); // 오래 조용했으면 심심함
       if (settings.trigAsk && Math.random() < +settings.askChance) {
         await doAsk(state, L().evAskIdle);
         lastSpoke = Date.now();
@@ -486,6 +509,7 @@ ipcMain.handle('bridge:status', () => ({ running }));
 
 // 채팅: 내 메시지 → LLM 응답 → (연결돼 있으면) 말풍선
 ipcMain.handle('chat:send', async (_, text) => {
+  bumpAff(1); setMood('neutral'); // 말 걸어주면 호감 +1, 심심함 해소
   addMemory('user', text);
   try {
     let state = {};
@@ -529,7 +553,7 @@ ipcMain.handle('ask:manual', async () => {
 
 ipcMain.handle('memory:get', () => memory);
 ipcMain.handle('memory:clear', () => {
-  memory = { recent: [], summary: '' };
+  memory = { recent: [], summary: '', affection: 30, lastTs: Date.now() };
   saveMemory();
   return { ok: true };
 });
@@ -537,7 +561,12 @@ ipcMain.handle('memory:clear', () => {
 // ─────────── 앱 부트 ───────────
 app.whenReady().then(() => {
   settings = loadJson(SETTINGS_PATH(), DEFAULTS);
-  memory = loadJson(MEMORY_PATH(), { recent: [], summary: '' });
+  memory = loadJson(MEMORY_PATH(), { recent: [], summary: '', affection: 30, lastTs: 0 });
+  // 오래 안 보면 호감도 소폭 감소 (하루 -2)
+  const days = memory.lastTs ? Math.floor((Date.now() - memory.lastTs) / 86400000) : 0;
+  if (days > 0) memory.affection = Math.max(0, (+memory.affection || 30) - 2 * days);
+  memory.lastTs = Date.now();
+  saveMemory();
   win = new BrowserWindow({
     width: 900, height: 680,
     title: 'BongoWaifu Bridge',

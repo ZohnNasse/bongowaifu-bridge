@@ -56,4 +56,10 @@ Development log for BongoWaifu Bridge. Newest entries at the bottom.
 - New trigger: when the `hot` gauge (0–100) reaches ≥99, a dedicated max-excitement line fires once (re-arms after the gauge drops below 80). Tier-up lines are suppressed while maxed.
 - Max event didn't fire in testing: gauge decays ~0.556/s so a momentary 100 can dip below 99 between 2s polls. Threshold lowered to 97, re-arm at <75, and a `gauge debug` log (raw gauges JSON) prints when ≥90 to verify the actual field names.
 - She kept saying "bridge" after connecting — the greet event text mentioned "started the bridge", and the model echoed it (event memos also persist in memory, reinforcing it). Greet text reworded to remove meta words, with an explicit "don't mention any system/app/connection" note.
+
+## 2026-06-10 — Affection & mood system
+
+- **Affection** (0–100, persisted in memory.json, starts at 30): chat +1, answering a button question +2, dismissing one -1, achievement +1, gauge max +2; decays -2 per day away. Tier labels (awkward strangers → like lovers) injected into the system prompt to control warmth/distance.
+- **Mood** (session-scoped: calm/happy/thrilled/bored): gauge tier-up → happy, gauge max → thrilled, achievement → happy, long silence → bored, user interaction resets to calm. Injected into the prompt to color tone.
+- Affection (♥ n/100) is visible in Settings → memory view.
 - Summary prompt now also preserves facts the character invented about herself (job, hobbies, anecdotes), not just facts about the user — keeps her self-made lore consistent across sessions.
