@@ -184,11 +184,11 @@ class MCP {
 }
 
 // ─────────── LLM ───────────
-async function llama(messages) {
+async function llama(messages, maxTok) {
   const body = {
     model: settings.llamaModel,
     temperature: +settings.temperature,
-    max_tokens: +settings.maxTokens,
+    max_tokens: maxTok || +settings.maxTokens,
     messages,
     stream: false,
   };
@@ -200,6 +200,15 @@ async function llama(messages) {
   if (!r.ok) throw new Error(`llama HTTP ${r.status}`);
   const j = await r.json();
   return (j.choices?.[0]?.message?.content || '').trim();
+}
+
+// 모델 출력 정리
+function stripThink(t) {
+  return t.replace(/<think>[\s\S]*?<\/think>/gi, '').replace(/<\/?think>/gi, '').trim();
+}
+function cleanLine(t, max) {
+  const line = stripThink(t).split('\n').map(s => s.trim()).filter(Boolean)[0] || '';
+  return line.replace(/^["'「]|["'」]$/g, '').slice(0, max);
 }
 
 // ─────────── 메모리 ───────────
@@ -255,8 +264,9 @@ async function genLine(state, event) {
     ...histMsgs(),
     { role: 'user', content: L().lineInstr(event) },
   ];
-  const t = await llama(msgs);
-  return t.replace(/^["'「]|["'」]$/g, '').split('\n')[0].slice(0, 120);
+  const line = cleanLine(await llama(msgs), 120);
+  if (!line) throw new Error('empty reply from model (raise max tokens or disable reasoning/think mode)');
+  return line;
 }
 
 async function genAsk(state, topic) {
@@ -265,7 +275,8 @@ async function genAsk(state, topic) {
     ...histMsgs(),
     { role: 'user', content: L().askInstr(topic) },
   ];
-  const t = await llama(msgs);
+  // JSON 출력은 토큰이 더 필요 — 최소 300 보장 (reasoning 모델 think 포함 대비)
+  const t = stripThink(await llama(msgs, Math.max(+settings.maxTokens || 0, 300)));
   const m = t.match(/\{[\s\S]*\}/);
   if (!m) throw new Error('ask JSON parse failed');
   const j = JSON.parse(m[0]);
@@ -410,7 +421,8 @@ ipcMain.handle('chat:send', async (_, text) => {
     let state = {};
     if (mcp) { try { state = await mcp.state(['character']); } catch {} }
     const msgs = [{ role: 'system', content: sysPrompt(state) }, ...histMsgs()];
-    const reply = (await llama(msgs)).split('\n')[0].slice(0, 200);
+    const reply = cleanLine(await llama(msgs), 200);
+    if (!reply) return { ok: false, error: 'empty reply from model (raise max tokens or disable reasoning/think mode)' };
     addMemory('waifu', reply);
     lastSpoke = Date.now();
     if (mcp) { try { await mcp.say(reply); } catch {} }

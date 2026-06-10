@@ -32,6 +32,9 @@
   .msg.waifu { align-self:flex-start; background:var(--panel); border-bottom-left-radius:3px; }
   .msg.sys   { align-self:center; color:var(--dim); font-size:12px; background:none; }
   .msg .tag  { font-size:11px; color:var(--dim); display:block; }
+  .msg.typing { color:var(--dim); }
+  .msg.typing::after { content:' …'; animation:blink 1s infinite; }
+  @keyframes blink { 50% { opacity:.2; } }
   #chatBar { display:flex; gap:6px; padding-top:8px; border-top:1px solid var(--line); }
   #chatInput { flex:1; background:var(--panel); border:1px solid var(--line); border-radius:6px; color:var(--txt); padding:8px 10px; }
 
@@ -150,6 +153,7 @@ const I18N = {
     btnSave:'저장 (실행 중이면 재시작)',
     msgSaved:'설정 저장됨', msgMemCleared:'기억 전체 삭제됨', msgConnFail:'연결 실패: ',
     msgAsking:'질문 생성 중... (게임 화면에서 버튼으로 답해줘)',
+    typing:'답변 생성 중',
     memNone:'(요약 없음)', memCount:n=>`— 최근 기억 ${n}줄 보관 중`, memDeleted:'(삭제됨)',
     tagAsk:'질문', tagAnswer:'버튼 답변',
   },
@@ -170,6 +174,7 @@ const I18N = {
     btnSave:'Save (restarts if running)',
     msgSaved:'Settings saved', msgMemCleared:'All memory cleared', msgConnFail:'Connection failed: ',
     msgAsking:'Generating question... (answer with the buttons in-game)',
+    typing:'thinking',
     memNone:'(no summary)', memCount:n=>`— ${n} recent lines stored`, memDeleted:'(deleted)',
     tagAsk:'Question', tagAnswer:'Button answer',
   },
@@ -240,15 +245,26 @@ $('btnToggle').onclick = async () => {
   if (!r.ok) addMsg('sys', '⚠ ' + t('msgConnFail') + r.error);
 };
 
-// 채팅 전송
+// 채팅 전송 (생성 중 표시 + 입력 잠금)
 async function sendChat() {
   const txt = $('chatInput').value.trim();
   if (!txt) return;
   $('chatInput').value = '';
   addMsg('user', txt);
-  const r = await window.api.chat(txt);
-  if (r.ok) addMsg('waifu', r.reply);
-  else addMsg('sys', '⚠ ' + r.error);
+  $('btnSend').disabled = $('btnSay').disabled = $('btnAsk').disabled = true;
+  const tip = document.createElement('div');
+  tip.className = 'msg waifu typing';
+  tip.textContent = t('typing');
+  $('chatLog').appendChild(tip);
+  $('chatLog').scrollTop = $('chatLog').scrollHeight;
+  try {
+    const r = await window.api.chat(txt);
+    if (r.ok) addMsg('waifu', r.reply);
+    else addMsg('sys', '⚠ ' + r.error);
+  } finally {
+    tip.remove();
+    $('btnSend').disabled = $('btnSay').disabled = $('btnAsk').disabled = false;
+  }
 }
 async function sendSay() {
   const txt = $('chatInput').value.trim();

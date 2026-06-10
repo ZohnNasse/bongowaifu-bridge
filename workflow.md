@@ -31,3 +31,9 @@ Development log for BongoWaifu Bridge. Newest entries at the bottom.
 ## 2026-06-10 — Start button states
 
 - Start/Stop button now has three visual states: stopped (pink "Start"), connecting (gray "Connecting...", disabled — prevents accidental double-click stopping the bridge), running (red "Stop"). Status text follows the same states.
+
+## 2026-06-10 — Chat UX: typing indicator & empty-reply fix
+
+- Chat now shows an animated "thinking…" bubble while the reply is generated; send/speak/ask buttons are locked during generation.
+- Fixed empty replies: added `cleanLine()` in `main.js` — strips `<think>…</think>` blocks (reasoning models), takes the first non-empty line instead of the raw first line (which was blank when output started with a newline). Empty result now returns an explicit error suggesting to raise max tokens or disable reasoning mode.
+- Fixed "ask JSON parse failed": question generation was truncated at the global max_tokens (120), cutting the JSON mid-output. `llama()` now accepts a per-call token override and ask generation guarantees at least 300 tokens; `<think>` blocks are stripped before JSON extraction.
