@@ -317,7 +317,8 @@ $('btnMemRefresh').onclick = async () => {
   const m = await window.api.getMemory();
   $('memSummaryView').textContent =
     '♥ ' + (m.affection ?? 30) + '/100\n' +
-    (m.summary || t('memNone')) + '\n' + t('memCount')(m.recent.length);
+    'memory.md: ' + m.mdPath + '\n\n' +
+    (m.md || t('memNone')) + '\n' + t('memCount')(m.recent.length);
 };
 $('btnMemClear').onclick = async () => {
   await window.api.clearMemory();

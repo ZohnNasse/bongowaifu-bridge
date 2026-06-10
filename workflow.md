@@ -67,4 +67,11 @@ Development log for BongoWaifu Bridge. Newest entries at the bottom.
 ## 2026-06-10 — Memory loss bug
 
 - If the summarization model returned an empty string, the old lines had already been spliced out of recent memory and were lost forever. Empty summaries now throw, restoring the spliced lines, with an on-screen log. Memory is never destroyed by a failed summarize.
+
+## 2026-06-10 — memory.md: Honcho-style structured long-term memory
+
+- Long-term memory moved from a single summary string to a human-readable/editable `memory.md` (userData folder) with three sections: **User Facts** (extracted insights about the user), **Character Lore** (facts she invented about herself), **Diary** (dated one-paragraph conversation summaries).
+- On overflow, the model extracts JSON `{user_facts, character_lore, diary}` from old lines; facts/lore are deduped and appended, diary accumulates by date. Extraction failure restores the raw lines — never lossy.
+- Prompt injection is capped at ~6k chars: facts+lore always included, oldest diary entries dropped first (64k-context local models handle this comfortably).
+- Old `memory.summary` is auto-migrated into the diary. The memory view in Settings shows the md path + full content; users can hand-edit the file.
 - Summary prompt now also preserves facts the character invented about herself (job, hobbies, anecdotes), not just facts about the user — keeps her self-made lore consistent across sessions.

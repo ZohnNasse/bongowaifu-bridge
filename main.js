@@ -17,6 +17,7 @@ let sessionStart = 0;
 // ─────────── 설정/메모리 영속화 ───────────
 const SETTINGS_PATH = () => path.join(app.getPath('userData'), 'settings.json');
 const MEMORY_PATH   = () => path.join(app.getPath('userData'), 'memory.json');
+const MEMMD_PATH    = () => path.join(app.getPath('userData'), 'memory.md');
 
 const DEFAULTS = {
   // 언어 ('ko' | 'en') — UI와 캐릭터 발화 언어
@@ -56,6 +57,37 @@ function bumpAff(d) {
   saveMemory();
 }
 function setMood(m) { mood = m; }
+
+// ─────────── memory.md (장기기억 — Honcho식 사실 추출) ───────────
+let memMd = '';
+function loadMd() { try { memMd = fs.readFileSync(MEMMD_PATH(), 'utf8'); } catch { memMd = ''; } }
+function saveMd() { try { fs.writeFileSync(MEMMD_PATH(), memMd); } catch {} }
+
+function parseMd(s) {
+  const get = h => {
+    const m = s.match(new RegExp(`## ${h}\\n([\\s\\S]*?)(?=\\n## |$)`));
+    return m ? m[1].trim() : '';
+  };
+  return { facts: get('User Facts'), lore: get('Character Lore'), diary: get('Diary') };
+}
+function buildMd(p) {
+  return `# Long-term Memory\n\n## User Facts\n${p.facts}\n\n## Character Lore\n${p.lore}\n\n## Diary\n${p.diary}\n`;
+}
+
+// 프롬프트용 발췌: 사실/설정 우선, 일기는 최신부터 (총량 캡 — 64k 컨텍스트면 여유)
+function memForPrompt() {
+  if (!memMd.trim()) return '';
+  const p = parseMd(memMd);
+  const CAP = 6000;
+  let entries = p.diary ? p.diary.split(/\n(?=### )/) : [];
+  let txt;
+  do {
+    txt = `[사용자 사실]\n${p.facts}\n[캐릭터 자기 설정]\n${p.lore}\n[일기]\n${entries.join('\n')}`;
+    if (txt.length > CAP && entries.length > 1) entries.shift(); // 오래된 일기부터 제외
+    else break;
+  } while (true);
+  return txt;
+}
 let askKeys = { textKey: 'text', optKey: 'options' }; // 연결 시 실제 스키마로 갱신
 
 function pickAskKeys(def) {
@@ -88,8 +120,8 @@ const STR = {
 3. AI나 설정의 존재를 언급하지 않고 끝까지 ${S.personaName}(으)로 산다.`,
     lineInstr: e => `(상황: ${e}) 이 상황에 맞는 짧은 대사 한 줄.`,
     askInstr: t => `(상황: ${t}) 사용자에게 물어볼 짧은 질문 1개와 선택지 2~4개를 만들어 JSON만 출력: {"text":"질문","options":["선택1","선택2"]}`,
-    sumSys: '다음 대화 기록을 기존 요약과 합쳐 한국어 6문장 이내로 요약하라. 사용자에 대한 사실(이름, 취향, 한 일, 약속)과 캐릭터가 스스로 말한 자기 설정(직장, 취미, 경험담 등)을 우선 보존 — 캐릭터 설정의 일관성에 필요하다. 요약문만 출력.',
-    sumUser: (old, txt) => `기존 요약:\n${old || '(없음)'}\n\n새 기록:\n${txt}`,
+    sumSys: '대화 기록에서 장기 기억으로 남길 것을 추출해 JSON만 출력하라: {"user_facts":["사용자에 대한 새로운 사실 (이름/직업/취향/한 일/약속)"],"character_lore":["캐릭터가 스스로 말한 자기 설정 (직장/취미/경험담)"],"diary":"오늘 대화의 한 단락 요약 (한국어)"}. 이미 기록된 내용과 중복 금지. 새로 알게 된 것이 없으면 빈 배열, diary는 항상 작성.',
+    sumUser: (old, txt) => `이미 기록된 기억:\n${old || '(없음)'}\n\n새 대화 기록:\n${txt}`,
     evGreet: '사용자가 방금 자리에 앉았다. 시간대에 맞는 인사를 건넨다. (시스템이나 앱, 연결에 대한 언급 금지)',
     evHot: l => `콤보 게이지가 레벨 ${l}로 올랐다. 신나게 반응한다.`,
     evHotMax: '콤보 게이지가 완전히 가득 찼다! 최고조 텐션으로 반응한다.',
@@ -123,8 +155,8 @@ const STR = {
 3. Never mention being an AI or having settings. Stay ${S.personaName} at all times.`,
     lineInstr: e => `(Situation: ${e}) One short line fitting this situation.`,
     askInstr: t => `(Situation: ${t}) Create 1 short question for the user with 2-4 button options. Output JSON only: {"text":"question","options":["opt1","opt2"]}`,
-    sumSys: 'Merge the following conversation log into the existing summary, max 6 English sentences. Prioritize facts about the user (name, preferences, things done, promises) AND facts the character stated about herself (job, hobbies, anecdotes) — needed for character consistency. Output the summary only.',
-    sumUser: (old, txt) => `Existing summary:\n${old || '(none)'}\n\nNew log:\n${txt}`,
+    sumSys: 'Extract long-term memory from the conversation log. Output JSON only: {"user_facts":["new facts about the user (name/job/preferences/things done/promises)"],"character_lore":["facts the character stated about herself (job/hobbies/anecdotes)"],"diary":"one-paragraph summary of today\'s conversation (English)"}. Do not duplicate already-recorded memory. Empty arrays if nothing new; always write the diary.',
+    sumUser: (old, txt) => `Already recorded memory:\n${old || '(none)'}\n\nNew conversation log:\n${txt}`,
     evGreet: 'The user just sat down. Greet them appropriately for the time of day. (Do not mention any system, app, or connection.)',
     evHot: l => `The combo gauge just rose to level ${l}. React excitedly.`,
     evHotMax: 'The combo gauge is completely maxed out! React at peak excitement.',
@@ -281,16 +313,31 @@ async function maybeSummarize() {
   const old = memory.recent.splice(0, memory.recent.length - lim);
   const text = old.map(m => `${m.who}: ${m.text}`).join('\n');
   try {
-    const sum = stripThink(await llama([
+    const raw = stripThink(await llama([
       { role: 'system', content: L().sumSys },
-      { role: 'user', content: L().sumUser(memory.summary, text) },
-    ], 500));
-    if (!sum) throw new Error('empty summary');   // 빈 요약이면 기억 날리지 않음
-    memory.summary = sum;
-    log('info', 'memory summarized');
+      { role: 'user', content: L().sumUser(memMd.slice(0, 3000), text) },
+    ], 800));
+    const m = raw.match(/\{[\s\S]*\}/);
+    if (!m) throw new Error('no JSON in extraction');
+    const j = JSON.parse(m[0]);
+    const p = parseMd(memMd);
+    // 사실/설정: 중복 아닌 것만 추가
+    for (const f of j.user_facts || [])
+      if (f && !p.facts.includes(f)) p.facts += (p.facts ? '\n' : '') + `- ${f}`;
+    for (const f of j.character_lore || [])
+      if (f && !p.lore.includes(f)) p.lore += (p.lore ? '\n' : '') + `- ${f}`;
+    // 일기: 날짜별 누적
+    if (j.diary) {
+      const d = new Date().toISOString().slice(0, 10);
+      if (p.diary.includes(`### ${d}`)) p.diary += `\n- ${j.diary}`;
+      else p.diary += (p.diary ? '\n\n' : '') + `### ${d}\n- ${j.diary}`;
+    }
+    memMd = buildMd(p);
+    saveMd();
+    log('info', 'memory.md updated');
   } catch (e) {
-    memory.recent.unshift(...old); // 실패 시 되돌림
-    log('info', `summarize failed, memory kept raw: ${e.message}`);
+    memory.recent.unshift(...old); // 실패 시 기억 보존
+    log('info', `memory extraction failed, kept raw: ${e.message}`);
   }
   saveMemory();
 }
@@ -315,7 +362,7 @@ function sysPrompt(state) {
   });
   const locale = settings.language === 'en' ? 'en-US' : 'ko-KR';
   const aff = Math.round(+memory.affection || 30);
-  return L().sys(settings, chJson, now.toLocaleString(locale), mins, memory.summary,
+  return L().sys(settings, chJson, now.toLocaleString(locale), mins, memForPrompt(),
                  aff, L().affTier(aff), L().moods[mood] || L().moods.neutral);
 }
 
@@ -554,10 +601,11 @@ ipcMain.handle('ask:manual', async () => {
   finally { busy = false; }
 });
 
-ipcMain.handle('memory:get', () => memory);
+ipcMain.handle('memory:get', () => ({ ...memory, md: memMd, mdPath: MEMMD_PATH() }));
 ipcMain.handle('memory:clear', () => {
   memory = { recent: [], summary: '', affection: 30, lastTs: Date.now() };
-  saveMemory();
+  memMd = '';
+  saveMemory(); saveMd();
   return { ok: true };
 });
 
@@ -565,6 +613,12 @@ ipcMain.handle('memory:clear', () => {
 app.whenReady().then(() => {
   settings = loadJson(SETTINGS_PATH(), DEFAULTS);
   memory = loadJson(MEMORY_PATH(), { recent: [], summary: '', affection: 30, lastTs: 0 });
+  loadMd();
+  // 구버전 summary → memory.md 일기로 이전
+  if (!memMd.trim() && memory.summary) {
+    memMd = buildMd({ facts: '', lore: '', diary: `### (migrated)\n- ${memory.summary}` });
+    saveMd();
+  }
   // 오래 안 보면 호감도 소폭 감소 (하루 -2)
   const days = memory.lastTs ? Math.floor((Date.now() - memory.lastTs) / 86400000) : 0;
   if (days > 0) memory.affection = Math.max(0, (+memory.affection || 30) - 2 * days);
