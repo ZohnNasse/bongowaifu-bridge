@@ -381,14 +381,17 @@ async function tick() {
 
     // 게이지 티어 상승 / 만땅
     const hot = state?.gauges?.hot_level ?? 0;
-    const hotVal = state?.gauges?.hot ?? 0;       // 0..100
-    if (settings.trigHot && hotVal >= 99 && !hotFull) {
+    const hotVal = state?.gauges?.hot ?? 0;       // 0..100, 초당 ~0.556 자연 감소
+    if (settings.trigHot && hotVal >= 90 && !hotFull) {
+      log('info', `gauge debug: ${JSON.stringify(state?.gauges)}`); // 필드 구조 확인용
+    }
+    if (settings.trigHot && hotVal >= 97 && !hotFull) {  // 폴링 간 감쇠 감안해 97로
       hotFull = true;
-      await speak(state, L().evHotMax, 'hotmax'); // 만땅은 별도 이벤트 (재발화는 80 미만으로 떨어진 뒤)
+      await speak(state, L().evHotMax, 'hotmax');
     } else if (settings.trigHot && hot > lastHotLevel && !hotFull) {
       await speak(state, L().evHot(hot), `hot${hot}`);
     }
-    if (hotVal < 80) hotFull = false;
+    if (hotVal < 75) hotFull = false;                    // 75 미만으로 떨어지면 재무장
     lastHotLevel = hot;
 
     // 신규 업적
