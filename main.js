@@ -292,10 +292,15 @@ async function genAsk(state, topic) {
   const m = t.match(/\{[\s\S]*\}/);
   if (!m) throw new Error('ask JSON parse failed');
   const j = JSON.parse(m[0]);
-  return {
-    text: String(j.text).slice(0, 120),
-    options: (j.options || L().defOpts).slice(0, 4).map(o => String(o).slice(0, 30)),
-  };
+  // 게임 요구사항: 버튼 2~4개 — 정리(공백/중복 제거) 후 부족하면 기본 선택지로 채움
+  let opts = (Array.isArray(j.options) ? j.options : [])
+    .map(o => String(o).trim().slice(0, 30)).filter(Boolean);
+  opts = [...new Set(opts)].slice(0, 4);
+  for (const d of L().defOpts) {
+    if (opts.length >= 2) break;
+    if (!opts.includes(d)) opts.push(d);
+  }
+  return { text: String(j.text || '').slice(0, 120), options: opts };
 }
 
 // ─────────── 발화 동작 ───────────
