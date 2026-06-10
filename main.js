@@ -18,6 +18,8 @@ const SETTINGS_PATH = () => path.join(app.getPath('userData'), 'settings.json');
 const MEMORY_PATH   = () => path.join(app.getPath('userData'), 'memory.json');
 
 const DEFAULTS = {
+  // 언어 ('ko' | 'en') — UI와 캐릭터 발화 언어
+  language: 'ko',
   // 연결
   bongoPort: 7337,
   llamaUrl: 'http://127.0.0.1:8001/v1/chat/completions',
@@ -46,6 +48,55 @@ const DEFAULTS = {
 
 let settings = { ...DEFAULTS };
 let memory = { recent: [], summary: '' };
+
+// ─────────── 다국어 프롬프트 ───────────
+const STR = {
+  ko: {
+    sys: (S, ch, timeStr, mins, summary) =>
+`너는 데스크톱 컴패니언 '${S.personaName}'(${S.personaAge}살)이다. 성격: ${S.personality}
+사용자를 '${S.userCall}'(이)라고 부른다. 말투: ${S.speechStyle}.
+현재 시각: ${timeStr} — 시간대 분위기 반영(새벽이면 건강 걱정, 아침엔 활기, 밤엔 차분). 사용자 연속 작업 ${mins}분째 — 2시간 넘으면 가끔 휴식 권유.
+게임 캐릭터 외형: ${ch} — 옷/스킨 분위기를 말투에 살짝 반영(gothic=시크, cute/pink=애교, maid=주인님 호칭, summer=산뜻).
+장기 기억: ${summary || '(없음)'}
+한국어로 대사만 출력. 따옴표·해설·이름표 금지.`,
+    lineInstr: e => `(상황: ${e}) 이 상황에 맞는 짧은 대사 한 줄.`,
+    askInstr: t => `(상황: ${t}) 사용자에게 물어볼 짧은 질문 1개와 선택지 2~4개를 만들어 JSON만 출력: {"text":"질문","options":["선택1","선택2"]}`,
+    sumSys: '다음 대화 기록을 기존 요약과 합쳐 한국어 5문장 이내로 요약하라. 사용자에 대한 사실(이름, 취향, 한 일, 약속)을 우선 보존. 요약문만 출력.',
+    sumUser: (old, txt) => `기존 요약:\n${old || '(없음)'}\n\n새 기록:\n${txt}`,
+    evGreet: '사용자가 막 자리에 앉아 브릿지를 켰다. 시간대에 맞는 인사를 건넨다.',
+    evHot: l => `콤보 게이지가 레벨 ${l}로 올랐다. 신나게 반응한다.`,
+    evAchv: n => `새 업적 '${n}' 달성. 축하하거나 장난친다.`,
+    evIdle: '한동안 조용했다. 가벼운 잡담 한 마디.',
+    evAskIdle: '한동안 조용했다. 사용자 근황이나 기분, 휴식 여부 등을 가볍게 묻는다.',
+    evAskManual: '사용자가 직접 질문 버튼을 눌렀다. 지금 궁금한 것을 묻는다.',
+    evReact: a => `사용자가 방금 질문에 '${a}'라고 답했다. 그에 맞게 반응한다.`,
+    defOpts: ['응', '아니'],
+    memCtx: e => `(상황 메모: ${e})`,
+  },
+  en: {
+    sys: (S, ch, timeStr, mins, summary) =>
+`You are '${S.personaName}' (${S.personaAge} y/o), a desktop companion. Personality: ${S.personality}
+You call the user '${S.userCall}'. Speech style: ${S.speechStyle}.
+Current time: ${timeStr} — reflect the time of day (worry about health late at night, energetic in the morning, calm in the evening). User has been working for ${mins} min straight — occasionally suggest a break past 2 hours.
+In-game character look: ${ch} — subtly reflect the skin/outfit vibe (gothic=cool & terse, cute/pink=soft & playful, maid=call them "master", summer=light & breezy).
+Long-term memory: ${summary || '(none)'}
+Reply in English, output the line only. No quotes, narration, or name tags.`,
+    lineInstr: e => `(Situation: ${e}) One short line fitting this situation.`,
+    askInstr: t => `(Situation: ${t}) Create 1 short question for the user with 2-4 button options. Output JSON only: {"text":"question","options":["opt1","opt2"]}`,
+    sumSys: 'Merge the following conversation log into the existing summary, max 5 English sentences. Prioritize facts about the user (name, preferences, things done, promises). Output the summary only.',
+    sumUser: (old, txt) => `Existing summary:\n${old || '(none)'}\n\nNew log:\n${txt}`,
+    evGreet: 'The user just sat down and started the bridge. Greet them appropriately for the time of day.',
+    evHot: l => `The combo gauge just rose to level ${l}. React excitedly.`,
+    evAchv: n => `New achievement '${n}' unlocked. Congratulate or tease.`,
+    evIdle: 'It has been quiet for a while. Drop a light bit of small talk.',
+    evAskIdle: 'It has been quiet for a while. Casually ask how the user is doing, their mood, or whether they need a break.',
+    evAskManual: 'The user pressed the ask button. Ask something you are curious about right now.',
+    evReact: a => `The user just answered '${a}' to your question. React accordingly.`,
+    defOpts: ['Yes', 'No'],
+    memCtx: e => `(context note: ${e})`,
+  },
+};
+const L = () => STR[settings.language] || STR.ko;
 
 function loadJson(p, fallback) {
   try { return { ...fallback, ...JSON.parse(fs.readFileSync(p, 'utf8')) }; }
@@ -166,10 +217,10 @@ async function maybeSummarize() {
   const text = old.map(m => `${m.who}: ${m.text}`).join('\n');
   try {
     memory.summary = await llama([
-      { role: 'system', content: '다음 대화 기록을 기존 요약과 합쳐 한국어 5문장 이내로 요약하라. 사용자에 대한 사실(이름, 취향, 한 일, 약속)을 우선 보존. 요약문만 출력.' },
-      { role: 'user', content: `기존 요약:\n${memory.summary || '(없음)'}\n\n새 기록:\n${text}` },
+      { role: 'system', content: L().sumSys },
+      { role: 'user', content: L().sumUser(memory.summary, text) },
     ]);
-    log('info', '장기 기억 요약 갱신됨');
+    log('info', 'memory summarized');
   } catch {
     memory.recent.unshift(...old); // 실패 시 되돌림
   }
@@ -181,29 +232,28 @@ function histMsgs() {
   return memory.recent.slice(-settings.memRecent).map(m => {
     if (m.who === 'user')  return { role: 'user', content: m.text };
     if (m.who === 'waifu') return { role: 'assistant', content: m.text };
-    return { role: 'user', content: `(상황 메모: ${m.text})` };
+    return { role: 'user', content: L().memCtx(m.text) };
   });
 }
 
 // ─────────── 프롬프트 ───────────
 function sysPrompt(state) {
-  const S = settings;
   const ch = state?.character || {};
   const now = new Date();
   const mins = sessionStart ? Math.round((Date.now() - sessionStart) / 60000) : 0;
-  return `너는 데스크톱 컴패니언 '${S.personaName}'(${S.personaAge}살)이다. 성격: ${S.personality}
-사용자를 '${S.userCall}'(이)라고 부른다. 말투: ${S.speechStyle}.
-현재 시각: ${now.toLocaleString('ko-KR')} — 시간대 분위기 반영(새벽이면 건강 걱정, 아침엔 활기, 밤엔 차분). 사용자 연속 작업 ${mins}분째 — 2시간 넘으면 가끔 휴식 권유.
-게임 캐릭터 외형: ${JSON.stringify({ type: ch.character_type, name: ch.character_name, skin: ch.current_skin, clothes: ch.current_clothes })} — 옷/스킨 분위기를 말투에 살짝 반영(gothic=시크, cute/pink=애교, maid=주인님 호칭, summer=산뜻).
-장기 기억: ${memory.summary || '(없음)'}
-대사만 출력. 따옴표·해설·이름표 금지.`;
+  const chJson = JSON.stringify({
+    type: ch.character_type, name: ch.character_name,
+    skin: ch.current_skin, clothes: ch.current_clothes,
+  });
+  const locale = settings.language === 'en' ? 'en-US' : 'ko-KR';
+  return L().sys(settings, chJson, now.toLocaleString(locale), mins, memory.summary);
 }
 
 async function genLine(state, event) {
   const msgs = [
     { role: 'system', content: sysPrompt(state) },
     ...histMsgs(),
-    { role: 'user', content: `(상황: ${event}) 이 상황에 맞는 짧은 대사 한 줄.` },
+    { role: 'user', content: L().lineInstr(event) },
   ];
   const t = await llama(msgs);
   return t.replace(/^["'「]|["'」]$/g, '').split('\n')[0].slice(0, 120);
@@ -213,15 +263,15 @@ async function genAsk(state, topic) {
   const msgs = [
     { role: 'system', content: sysPrompt(state) },
     ...histMsgs(),
-    { role: 'user', content: `(상황: ${topic}) 사용자에게 물어볼 짧은 질문 1개와 선택지 2~4개를 만들어 JSON만 출력: {"text":"질문","options":["선택1","선택2"]}` },
+    { role: 'user', content: L().askInstr(topic) },
   ];
   const t = await llama(msgs);
   const m = t.match(/\{[\s\S]*\}/);
-  if (!m) throw new Error('질문 JSON 파싱 실패');
+  if (!m) throw new Error('ask JSON parse failed');
   const j = JSON.parse(m[0]);
   return {
     text: String(j.text).slice(0, 120),
-    options: (j.options || ['응', '아니']).slice(0, 4).map(o => String(o).slice(0, 30)),
+    options: (j.options || L().defOpts).slice(0, 4).map(o => String(o).slice(0, 30)),
   };
 }
 
@@ -238,21 +288,21 @@ async function speak(state, event, tag) {
 async function doAsk(state, topic) {
   const q = await genAsk(state, topic);
   log('ask', `${q.text}  [${q.options.join(' / ')}]`);
-  addMemory('waifu', `(질문) ${q.text} 선택지: ${q.options.join('/')}`);
-  let answer = '(무응답/닫음)';
+  addMemory('waifu', `(Q) ${q.text} options: ${q.options.join('/')}`);
+  let answer = '(no answer / dismissed)';
   try {
     const res = await mcp.ask(q.text, q.options); // 플레이어 답변까지 블로킹
     const c = res.content;
     if (Array.isArray(c) && c[0]?.text) answer = c[0].text;
     else if (typeof res.answer === 'string') answer = res.answer;
   } catch (e) {
-    log('error', `ask_and_wait 실패: ${e.message}`);
+    log('error', `ask_and_wait failed: ${e.message}`);
     return;
   }
-  addMemory('user', `(버튼 선택) ${answer}`);
+  addMemory('user', `(button) ${answer}`);
   log('answer', answer);
   // 답변에 대한 리액션
-  await speak(state, `사용자가 방금 질문에 '${answer}'라고 답했다. 그에 맞게 반응한다.`, 'react');
+  await speak(state, L().evReact(answer), 'react');
 }
 
 // ─────────── 자동 루프 ───────────
@@ -265,7 +315,7 @@ async function tick() {
     // 게이지 티어 상승
     const hot = state?.gauges?.hot_level ?? 0;
     if (settings.trigHot && hot > lastHotLevel) {
-      await speak(state, `콤보 게이지가 레벨 ${hot}로 올랐다. 신나게 반응한다.`, `hot${hot}`);
+      await speak(state, L().evHot(hot), `hot${hot}`);
     }
     lastHotLevel = hot;
 
@@ -274,7 +324,7 @@ async function tick() {
       for (const a of state?.achievements || []) {
         if (a.unlocked && !seenAchv.has(a.api_name)) {
           seenAchv.add(a.api_name);
-          await speak(state, `새 업적 '${a.display_name || a.api_name}' 달성. 축하하거나 장난친다.`, 'achv');
+          await speak(state, L().evAchv(a.display_name || a.api_name), 'achv');
         }
       }
     }
@@ -282,14 +332,14 @@ async function tick() {
     // idle 잡담 / 질문
     if (settings.trigIdle && Date.now() - lastSpoke > settings.idleSec * 1000) {
       if (settings.trigAsk && Math.random() < +settings.askChance) {
-        await doAsk(state, '한동안 조용했다. 사용자 근황이나 기분, 휴식 여부 등을 가볍게 묻는다.');
+        await doAsk(state, L().evAskIdle);
         lastSpoke = Date.now();
       } else {
-        await speak(state, '한동안 조용했다. 가벼운 잡담 한 마디.', 'idle');
+        await speak(state, L().evIdle, 'idle');
       }
     }
   } catch (e) {
-    log('error', `루프 오류: ${e.message}`);
+    log('error', `loop error: ${e.message}`);
   } finally {
     busy = false;
   }
@@ -301,8 +351,8 @@ async function start() {
   try {
     await mcp.init();
     const tools = await mcp.tools();
-    log('info', `연결됨. 툴: ${tools.join(', ')}`);
-    if (!tools.includes('say')) throw new Error('say 툴 없음 — 게임에서 AI Connection 토글 확인');
+    log('info', `connected. tools: ${tools.join(', ')}`);
+    if (!tools.includes('say')) throw new Error('no say tool — check AI Connection toggle in game');
   } catch (e) {
     mcp = null;
     return { ok: false, error: e.message };
@@ -323,8 +373,8 @@ async function start() {
     busy = true;
     try {
       const st = await mcp.state(['character']);
-      await speak(st, '사용자가 막 자리에 앉아 브릿지를 켰다. 시간대에 맞는 인사를 건넨다.', 'greet');
-    } catch (e) { log('error', `인사 실패: ${e.message}`); }
+      await speak(st, L().evGreet, 'greet');
+    } catch (e) { log('error', `greet failed: ${e.message}`); }
     busy = false;
   }
 
@@ -337,7 +387,7 @@ function stop() {
   if (loopTimer) clearInterval(loopTimer);
   loopTimer = null;
   mcp = null;
-  log('info', '중지됨');
+  log('info', 'stopped');
 }
 
 // ─────────── IPC ───────────
@@ -372,7 +422,7 @@ ipcMain.handle('chat:send', async (_, text) => {
 
 // 수동 발화: 입력한 텍스트 그대로 말풍선
 ipcMain.handle('say:manual', async (_, text) => {
-  if (!mcp) return { ok: false, error: '연결 안 됨' };
+  if (!mcp) return { ok: false, error: 'not connected' };
   try {
     await mcp.say(text);
     addMemory('waifu', text);
@@ -384,12 +434,12 @@ ipcMain.handle('say:manual', async (_, text) => {
 
 // 수동 질문 트리거
 ipcMain.handle('ask:manual', async () => {
-  if (!mcp) return { ok: false, error: '연결 안 됨' };
-  if (busy) return { ok: false, error: '다른 작업 중' };
+  if (!mcp) return { ok: false, error: 'not connected' };
+  if (busy) return { ok: false, error: 'busy' };
   busy = true;
   try {
     const state = await mcp.state(['character']);
-    await doAsk(state, '사용자가 직접 질문 버튼을 눌렀다. 지금 궁금한 것을 묻는다.');
+    await doAsk(state, L().evAskManual);
     return { ok: true };
   } catch (e) { return { ok: false, error: e.message }; }
   finally { busy = false; }
