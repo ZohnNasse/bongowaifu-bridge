@@ -14,6 +14,9 @@
   button { background:var(--panel); color:var(--txt); border:1px solid var(--line); border-radius:6px; padding:6px 14px; cursor:pointer; }
   button:hover { border-color:var(--acc); }
   button.primary { background:var(--acc); color:#fff; border:none; }
+  #btnToggle.running { background:#ef4444; }
+  #btnToggle.connecting { background:#666; cursor:wait; opacity:.7; }
+  #btnToggle:disabled { pointer-events:none; }
   select { background:var(--panel); color:var(--txt); border:1px solid var(--line); border-radius:6px; padding:6px 8px; }
   .tabs { display:flex; gap:4px; padding:8px 14px 0; }
   .tabs button { border-radius:6px 6px 0 0; border-bottom:none; }
@@ -132,7 +135,7 @@ let running = false;
 const I18N = {
   ko: {
     tabChat:'채팅', tabSettings:'설정',
-    statusOn:'실행 중', statusOff:'중지됨', btnStart:'시작', btnStop:'중지',
+    statusOn:'실행 중', statusOff:'중지됨', statusConnecting:'연결 중...', btnStart:'시작', btnStop:'중지', btnConnecting:'연결 중...',
     placeholder:'메시지 입력... (Enter: 대화 / Ctrl+Enter: 그대로 말풍선)',
     btnSend:'대화', btnSay:'대사', btnAsk:'질문시키기',
     legPersona:'페르소나', lblName:'이름', lblAge:'나이', lblCall:'사용자 호칭', lblPersonality:'성격', lblStyle:'말투',
@@ -152,7 +155,7 @@ const I18N = {
   },
   en: {
     tabChat:'Chat', tabSettings:'Settings',
-    statusOn:'Running', statusOff:'Stopped', btnStart:'Start', btnStop:'Stop',
+    statusOn:'Running', statusOff:'Stopped', statusConnecting:'Connecting...', btnStart:'Start', btnStop:'Stop', btnConnecting:'Connecting...',
     placeholder:'Type a message... (Enter: chat / Ctrl+Enter: speak as-is)',
     btnSend:'Chat', btnSay:'Speak', btnAsk:'Make her ask',
     legPersona:'Persona', lblName:'Name', lblAge:'Age', lblCall:'How she calls you', lblPersonality:'Personality', lblStyle:'Speech style',
@@ -211,20 +214,30 @@ window.api.onLog(({ type, text }) => {
   else addMsg('sys', text);
 });
 
-// 시작/중지
+// 시작/중지 (상태: stopped → connecting → running)
 function setStatus(on) {
   running = on;
+  const b = $('btnToggle');
+  b.disabled = false;
+  b.classList.remove('connecting');
+  b.classList.toggle('running', on);
   $('dot').classList.toggle('on', on);
   $('statusTxt').textContent = on ? t('statusOn') : t('statusOff');
-  $('btnToggle').textContent = on ? t('btnStop') : t('btnStart');
+  b.textContent = on ? t('btnStop') : t('btnStart');
+}
+function setConnecting() {
+  const b = $('btnToggle');
+  b.disabled = true;                  // 연결 중엔 클릭 불가
+  b.classList.add('connecting');
+  b.textContent = t('btnConnecting');
+  $('statusTxt').textContent = t('statusConnecting');
 }
 $('btnToggle').onclick = async () => {
   if (running) { await window.api.stop(); setStatus(false); return; }
-  $('btnToggle').disabled = true;
+  setConnecting();
   const r = await window.api.start();
-  $('btnToggle').disabled = false;
-  if (r.ok) setStatus(true);
-  else addMsg('sys', '⚠ ' + t('msgConnFail') + r.error);
+  setStatus(!!r.ok);
+  if (!r.ok) addMsg('sys', '⚠ ' + t('msgConnFail') + r.error);
 };
 
 // 채팅 전송

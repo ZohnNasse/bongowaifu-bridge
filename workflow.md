@@ -27,3 +27,7 @@ Development log for BongoWaifu Bridge. Newest entries at the bottom.
 - `index.html`: full UI i18n via `data-i18n` attributes and the `I18N` dictionary; language switch applies to the UI immediately (speech language applies after Save).
 - README rewritten bilingual, English first (most players are non-Korean; intended for Steam Workshop sharing).
 - Added this `workflow.md` to track work going forward.
+
+## 2026-06-10 — Start button states
+
+- Start/Stop button now has three visual states: stopped (pink "Start"), connecting (gray "Connecting...", disabled — prevents accidental double-click stopping the bridge), running (red "Stop"). Status text follows the same states.
