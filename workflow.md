@@ -62,4 +62,5 @@ Development log for BongoWaifu Bridge. Newest entries at the bottom.
 - **Affection** (0–100, persisted in memory.json, starts at 30): chat +1, answering a button question +2, dismissing one -1, achievement +1, gauge max +2; decays -2 per day away. Tier labels (awkward strangers → like lovers) injected into the system prompt to control warmth/distance.
 - **Mood** (session-scoped: calm/happy/thrilled/bored): gauge tier-up → happy, gauge max → thrilled, achievement → happy, long silence → bored, user interaction resets to calm. Injected into the prompt to color tone.
 - Affection (♥ n/100) is visible in Settings → memory view.
+- Affection now also shows permanently in the header (♥ n, pink), refreshed every 10s.
 - Summary prompt now also preserves facts the character invented about herself (job, hobbies, anecdotes), not just facts about the user — keeps her self-made lore consistent across sessions.
