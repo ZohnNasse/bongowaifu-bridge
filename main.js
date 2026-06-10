@@ -225,10 +225,10 @@ async function maybeSummarize() {
   const old = memory.recent.splice(0, memory.recent.length - lim);
   const text = old.map(m => `${m.who}: ${m.text}`).join('\n');
   try {
-    memory.summary = await llama([
+    memory.summary = stripThink(await llama([
       { role: 'system', content: L().sumSys },
       { role: 'user', content: L().sumUser(memory.summary, text) },
-    ]);
+    ], 500));
     log('info', 'memory summarized');
   } catch {
     memory.recent.unshift(...old); // 실패 시 되돌림
@@ -264,7 +264,8 @@ async function genLine(state, event) {
     ...histMsgs(),
     { role: 'user', content: L().lineInstr(event) },
   ];
-  const line = cleanLine(await llama(msgs), 120);
+  // reasoning 모델이 think에 토큰을 소모해도 본문이 나오도록 최소 300 보장
+  const line = cleanLine(await llama(msgs, Math.max(+settings.maxTokens || 0, 300)), 120);
   if (!line) throw new Error('empty reply from model (raise max tokens or disable reasoning/think mode)');
   return line;
 }
@@ -421,7 +422,7 @@ ipcMain.handle('chat:send', async (_, text) => {
     let state = {};
     if (mcp) { try { state = await mcp.state(['character']); } catch {} }
     const msgs = [{ role: 'system', content: sysPrompt(state) }, ...histMsgs()];
-    const reply = cleanLine(await llama(msgs), 200);
+    const reply = cleanLine(await llama(msgs, Math.max(+settings.maxTokens || 0, 300)), 200);
     if (!reply) return { ok: false, error: 'empty reply from model (raise max tokens or disable reasoning/think mode)' };
     addMemory('waifu', reply);
     lastSpoke = Date.now();
