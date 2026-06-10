@@ -321,10 +321,10 @@ class MCP {
 // ─────────── LLM ───────────
 const TOK_FLOOR = 512; // reasoning 모델 think 소모 대비 최소 출력 토큰
 
-async function llama(messages, maxTok) {
+async function llama(messages, maxTok, temp) {
   const body = {
     model: settings.llamaModel,
-    temperature: +settings.temperature,
+    temperature: temp ?? +settings.temperature,
     max_tokens: Math.max(maxTok || 0, +settings.maxTokens || 0, TOK_FLOOR),
     messages,
     stream: false,
@@ -402,13 +402,29 @@ async function maybeSummarize() {
   saveMemory();
 }
 
-function histMsgs() {
-  // 최근 기억을 chat 메시지로 변환 (event는 상황 메모로)
-  return memory.recent.slice(-settings.memRecent).map(m => {
-    if (m.who === 'user')  return { role: 'user', content: m.text };
-    if (m.who === 'waifu') return { role: 'assistant', content: m.text };
-    return { role: 'user', content: L().memCtx(m.text) };
-  });
+function histMsgs(n) {
+  // 최근 기억을 chat 메시지로 변환.
+  // 지나간 상황 메모(event)는 제외 — 옛 상황에 계속 머무는 것 방지 (현재 상황은 lineInstr로 매번 새로 전달됨)
+  const lim = Math.min(n || +settings.memRecent, +settings.memRecent);
+  return memory.recent
+    .filter(m => m.who !== 'event')
+    .slice(-lim)
+    .map(m => m.who === 'user'
+      ? { role: 'user', content: m.text }
+      : { role: 'assistant', content: m.text });
+}
+
+// 대사 유사도 검사 (정규화 후 포함관계 / 2-gram 겹침)
+function tooSimilar(a, b) {
+  const norm = s => String(s).toLowerCase().replace(/[\s\W]/g, '');
+  a = norm(a); b = norm(b);
+  if (!a || !b) return false;
+  if (a.includes(b) || b.includes(a)) return true;
+  const grams = s => new Set(Array.from({ length: s.length - 1 }, (_, i) => s.slice(i, i + 2)));
+  const A = grams(a), B = grams(b);
+  let inter = 0;
+  for (const g of A) if (B.has(g)) inter++;
+  return inter / Math.min(A.size, B.size) > 0.6;
 }
 
 // ─────────── 프롬프트 ───────────
@@ -436,14 +452,14 @@ function sysPrompt(state) {
   return sys;
 }
 
-async function genLine(state, event) {
+async function genLine(state, event, temp) {
   const msgs = [
     { role: 'system', content: sysPrompt(state) },
-    ...histMsgs(),
+    ...histMsgs(10), // 자동 발화는 최근 10줄만 — 과거 대사를 모범답안처럼 따라하는 것 방지
     { role: 'user', content: L().lineInstr(event) },
   ];
   // reasoning 모델이 think에 토큰을 소모해도 본문이 나오도록 최소 300 보장
-  const line = cleanLine(await llama(msgs, Math.max(+settings.maxTokens || 0, 300)), 120);
+  const line = cleanLine(await llama(msgs, Math.max(+settings.maxTokens || 0, 300), temp), 120);
   if (!line) throw new Error('empty reply from model (raise max tokens or disable reasoning/think mode)');
   return line;
 }
@@ -451,7 +467,7 @@ async function genLine(state, event) {
 async function genAsk(state, topic) {
   const msgs = [
     { role: 'system', content: sysPrompt(state) },
-    ...histMsgs(),
+    ...histMsgs(10),
     { role: 'user', content: L().askInstr(topic) },
   ];
   // JSON 출력은 토큰이 더 필요 — 최소 300 보장 (reasoning 모델 think 포함 대비)
@@ -501,7 +517,16 @@ async function sayBubbles(text) {
 }
 
 async function speak(state, event, tag) {
-  const line = await genLine(state, event);
+  let line = await genLine(state, event);
+  // 최근 대사와 너무 비슷하면 1회 재생성 (온도 올려서)
+  const prev = memory.recent.filter(m => m.who === 'waifu').slice(-5).map(m => m.text);
+  if (prev.some(p => tooSimilar(line, p))) {
+    log('info', 'similar line — regenerating');
+    const note = settings.language === 'en'
+      ? ' (Your draft repeated an earlier line — say something completely different.)'
+      : ' (방금 떠올린 문장은 이미 했던 말과 겹침 — 완전히 다른 문장으로.)';
+    line = await genLine(state, event + note, Math.min(2, +settings.temperature + 0.25));
+  }
   await sayBubbles(line);
   addMemory('event', event);
   addMemory('waifu', line);

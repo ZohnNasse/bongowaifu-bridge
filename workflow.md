@@ -96,4 +96,10 @@ Development log for BongoWaifu Bridge. Newest entries at the bottom.
 
 - All speech (auto lines, chat replies, manual speak) can now be voiced. Settings → Voice (TTS): enable toggle, server URL, voice name, rate.
 - Fallback chain: if a TTS server URL is set, the renderer POSTs `{text, voice}` and plays the returned audio (works with GPT-SoVITS-style endpoints); on failure or empty URL it falls back to the OS built-in voice (Web Speech API, voice matched by name substring then by UI language). Sequential playback queue prevents overlap.
+
+## 2026-06-10 — Anti-repetition & situation stickiness
+
+- Past situation memos ('event' entries) are no longer fed back into generation history — the model kept reacting to stale situations instead of moving on (the current situation always arrives fresh via the instruction).
+- Auto lines/asks now see only the last 10 history lines (full history was acting as few-shot examples of itself); chat keeps the full window.
+- Post-generation similarity check (substring + 2-gram overlap >0.6 vs last 5 spoken lines): a too-similar line is regenerated once with a "say something completely different" note and temperature +0.25.
 - Summary prompt now also preserves facts the character invented about herself (job, hobbies, anecdotes), not just facts about the user — keeps her self-made lore consistent across sessions.
