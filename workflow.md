@@ -83,4 +83,8 @@ Development log for BongoWaifu Bridge. Newest entries at the bottom.
 ## 2026-06-10 — Multi-bubble speech
 
 - Long replies are now split at sentence boundaries into multiple speech bubbles (~110 chars each), sent sequentially with reading-time delays (2s + 35ms/char). Bubble count scales with reply length (safety cap 8). Applies to chat replies (cap raised to 600 chars), manual speak, and auto lines.
+
+## 2026-06-10 — Proactive user-fact learning
+
+- Every user chat message and button answer now runs a background fact-extraction pass (`extractUserFacts`): the model pulls clearly-stated facts (likes/dislikes/personality/job/life/promises, no guessing) and appends deduped entries to memory.md → User Facts immediately — no longer waiting for memory overflow. Fire-and-forget, never blocks the reply; failures are silent. A "user facts +N" log appears when something is learned.
 - Summary prompt now also preserves facts the character invented about herself (job, hobbies, anecdotes), not just facts about the user — keeps her self-made lore consistent across sessions.

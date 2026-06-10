@@ -69,6 +69,25 @@ function loadPersonaMd() {
   try { return fs.readFileSync(PERSONA_PATH(), 'utf8').trim(); } catch { return ''; }
 }
 
+// 사용자 메시지에서 사실 추출 → memory.md User Facts에 즉시 누적 (백그라운드)
+async function extractUserFacts(text) {
+  try {
+    const raw = stripThink(await llama([
+      { role: 'system', content: L().factSys },
+      { role: 'user', content: L().factUser(parseMd(memMd).facts.slice(0, 2000), text) },
+    ], 300));
+    const m = raw.match(/\{[\s\S]*\}/);
+    if (!m) return;
+    const list = (JSON.parse(m[0]).facts || []).map(f => String(f).trim()).filter(Boolean);
+    if (!list.length) return;
+    const p = parseMd(memMd);
+    let added = 0;
+    for (const f of list)
+      if (!p.facts.includes(f)) { p.facts += (p.facts ? '\n' : '') + `- ${f}`; added++; }
+    if (added) { memMd = buildMd(p); saveMd(); log('info', `user facts +${added}`); }
+  } catch {} // 실패해도 대화엔 영향 없음
+}
+
 function parseMd(s) {
   const get = h => {
     const m = s.match(new RegExp(`## ${h}\\n([\\s\\S]*?)(?=\\n## |$)`));
@@ -138,6 +157,8 @@ const STR = {
     evReact: a => `사용자가 방금 질문에 '${a}'라고 답했다. 그에 맞게 반응한다.`,
     defOpts: ['응', '아니'],
     memCtx: e => `(상황 메모: ${e})`,
+    factSys: '사용자의 메시지에서 사용자에 대한 새로운 사실(좋아함/싫어함/성격/직업/일상/약속)을 추출해 JSON만 출력: {"facts":["사실"]}. 추측 금지 — 명확히 드러난 것만, 각 사실은 한 문장. 새 사실이 없으면 {"facts":[]}.',
+    factUser: (known, msg) => `이미 아는 사실(중복 금지):\n${known || '(없음)'}\n\n사용자 메시지: "${msg}"`,
     affTier: a => a < 20 ? '서먹한 사이' : a < 40 ? '아는 사이' : a < 60 ? '친한 사이' : a < 80 ? '애틋한 사이' : '연인 같은 사이',
     moods: { neutral: '평온함', happy: '신남', excited: '들뜸', bored: '심심함' },
   },
@@ -173,6 +194,8 @@ const STR = {
     evReact: a => `The user just answered '${a}' to your question. React accordingly.`,
     defOpts: ['Yes', 'No'],
     memCtx: e => `(context note: ${e})`,
+    factSys: 'Extract new facts about the user (likes/dislikes/personality/job/life/promises) from their message. Output JSON only: {"facts":["fact"]}. No guessing — only what is clearly stated, one sentence each. If nothing new: {"facts":[]}.',
+    factUser: (known, msg) => `Already known facts (no duplicates):\n${known || '(none)'}\n\nUser message: "${msg}"`,
     affTier: a => a < 20 ? 'awkward strangers' : a < 40 ? 'acquaintances' : a < 60 ? 'close friends' : a < 80 ? 'affectionate' : 'like lovers',
     moods: { neutral: 'calm', happy: 'happy', excited: 'thrilled', bored: 'bored' },
   },
@@ -480,6 +503,7 @@ async function doAsk(state, topic) {
   bumpAff(answer.startsWith('(no answer') ? -1 : 2); // 답하면 +2, 무시하면 -1
   setMood('neutral');
   addMemory('user', `(button) ${answer}`);
+  if (!answer.startsWith('(no answer')) extractUserFacts(`Q: ${q.text} → A: ${answer}`);
   log('answer', answer);
   // 답변에 대한 리액션
   await speak(state, L().evReact(answer), 'react');
@@ -605,6 +629,7 @@ ipcMain.handle('bridge:status', () => ({ running }));
 ipcMain.handle('chat:send', async (_, text) => {
   bumpAff(1); setMood('neutral'); // 말 걸어주면 호감 +1, 심심함 해소
   addMemory('user', text);
+  extractUserFacts(text); // 비동기 — 답변 생성을 막지 않음
   try {
     let state = {};
     if (mcp) { try { state = await mcp.state(['character']); } catch {} }
