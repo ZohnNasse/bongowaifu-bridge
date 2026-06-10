@@ -91,4 +91,9 @@ Development log for BongoWaifu Bridge. Newest entries at the bottom.
 ## 2026-06-10 — Idle chatter variety
 
 - Idle lines were repetitive (same instruction every time). Now each idle event picks a random topic from a 10-item pool (time-of-day monologue, own daily life, a known user fact, current obsession, wondering about the user, silly thought, hungry/sleepy complaint, reflection on today, light teasing, season/weather) with an explicit no-repeat instruction. Also added `presence_penalty: 0.6` / `frequency_penalty: 0.3` to all generation requests.
+
+## 2026-06-10 — TTS
+
+- All speech (auto lines, chat replies, manual speak) can now be voiced. Settings → Voice (TTS): enable toggle, server URL, voice name, rate.
+- Fallback chain: if a TTS server URL is set, the renderer POSTs `{text, voice}` and plays the returned audio (works with GPT-SoVITS-style endpoints); on failure or empty URL it falls back to the OS built-in voice (Web Speech API, voice matched by name substring then by UI language). Sequential playback queue prevents overlap.
 - Summary prompt now also preserves facts the character invented about herself (job, hobbies, anecdotes), not just facts about the user — keeps her self-made lore consistent across sessions.

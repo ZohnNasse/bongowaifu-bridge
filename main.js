@@ -47,6 +47,11 @@ const DEFAULTS = {
   // 메모리
   memRecent: 40,
   memSummary: true,
+  // TTS
+  ttsEnable: false,
+  ttsUrl: '',        // 비우면 OS 내장 음성. 채우면 POST {text, voice} → audio 응답 기대, 실패 시 OS 폴백
+  ttsVoice: '',      // 서버 음성 이름 또는 OS 음성 이름 일부 (예: Heami)
+  ttsRate: 1.0,
 };
 
 let settings = { ...DEFAULTS };
@@ -484,8 +489,9 @@ function splitBubbles(text, max = 110, maxParts = 8) {
   return parts.filter(Boolean);
 }
 
-// 분할 발화: 앞 말풍선을 읽을 시간을 주고 다음 전송
+// 분할 발화: 앞 말풍선을 읽을 시간을 주고 다음 전송 (+ TTS는 렌더러에서 재생)
 async function sayBubbles(text) {
+  if (settings.ttsEnable && win && !win.isDestroyed()) win.webContents.send('tts', { text });
   const parts = splitBubbles(text);
   for (let i = 0; i < parts.length; i++) {
     await mcp.say(parts[i]);

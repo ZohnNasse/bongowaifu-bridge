@@ -12,4 +12,5 @@ contextBridge.exposeInMainWorld('api', {
   getMemory: () => ipcRenderer.invoke('memory:get'),
   clearMemory: () => ipcRenderer.invoke('memory:clear'),
   onLog: (cb) => ipcRenderer.on('log', (_, d) => cb(d)),
+  onTts: (cb) => ipcRenderer.on('tts', (_, d) => cb(d)),
 });
