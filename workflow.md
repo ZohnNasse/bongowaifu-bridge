@@ -87,4 +87,8 @@ Development log for BongoWaifu Bridge. Newest entries at the bottom.
 ## 2026-06-10 — Proactive user-fact learning
 
 - Every user chat message and button answer now runs a background fact-extraction pass (`extractUserFacts`): the model pulls clearly-stated facts (likes/dislikes/personality/job/life/promises, no guessing) and appends deduped entries to memory.md → User Facts immediately — no longer waiting for memory overflow. Fire-and-forget, never blocks the reply; failures are silent. A "user facts +N" log appears when something is learned.
+
+## 2026-06-10 — Idle chatter variety
+
+- Idle lines were repetitive (same instruction every time). Now each idle event picks a random topic from a 10-item pool (time-of-day monologue, own daily life, a known user fact, current obsession, wondering about the user, silly thought, hungry/sleepy complaint, reflection on today, light teasing, season/weather) with an explicit no-repeat instruction. Also added `presence_penalty: 0.6` / `frequency_penalty: 0.3` to all generation requests.
 - Summary prompt now also preserves facts the character invented about herself (job, hobbies, anecdotes), not just facts about the user — keeps her self-made lore consistent across sessions.

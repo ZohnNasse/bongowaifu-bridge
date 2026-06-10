@@ -151,7 +151,19 @@ const STR = {
     evHot: l => `콤보 게이지가 레벨 ${l}로 올랐다. 신나게 반응한다.`,
     evHotMax: '콤보 게이지가 완전히 가득 찼다! 최고조 텐션으로 반응한다.',
     evAchv: n => `새 업적 '${n}' 달성. 축하하거나 장난친다.`,
-    evIdle: '한동안 조용했다. 가벼운 잡담 한 마디.',
+    idleTopics: [
+      '지금 시간대에 어울리는 혼잣말',
+      '문득 떠오른 자기 일상 이야기',
+      '사용자에 대해 아는 사실 하나를 자연스럽게 화제로',
+      '요즘 자기가 빠져 있는 것 이야기',
+      '사용자가 지금 뭘 하고 있는지 궁금해하기',
+      '뜬금없고 엉뚱한 상상',
+      '배고픔이나 졸림 같은 사소한 투덜거림',
+      '오늘 하루에 대한 짧은 감상',
+      '사용자를 살짝 놀리는 장난',
+      '계절이나 날씨 이야기',
+    ],
+    evIdle: () => `한동안 조용했다. 잡담 주제: "${STR.ko.idleTopics[Math.floor(Math.random() * STR.ko.idleTopics.length)]}". 직전 대사들과 비슷한 말 반복 절대 금지 — 완전히 새로운 문장으로.`,
     evAskIdle: '한동안 조용했다. 사용자 근황이나 기분, 휴식 여부 등을 가볍게 묻는다.',
     evAskManual: '사용자가 직접 질문 버튼을 눌렀다. 지금 궁금한 것을 묻는다.',
     evReact: a => `사용자가 방금 질문에 '${a}'라고 답했다. 그에 맞게 반응한다.`,
@@ -188,7 +200,19 @@ const STR = {
     evHot: l => `The combo gauge just rose to level ${l}. React excitedly.`,
     evHotMax: 'The combo gauge is completely maxed out! React at peak excitement.',
     evAchv: n => `New achievement '${n}' unlocked. Congratulate or tease.`,
-    evIdle: 'It has been quiet for a while. Drop a light bit of small talk.',
+    idleTopics: [
+      'a little monologue fitting the current time of day',
+      'a random story from your own daily life',
+      'naturally bringing up one known fact about the user',
+      'something you are into lately',
+      'wondering what the user is doing right now',
+      'a silly out-of-nowhere thought',
+      'a small complaint like being hungry or sleepy',
+      'a short reflection on today',
+      'lightly teasing the user',
+      'the season or the weather',
+    ],
+    evIdle: () => `It has been quiet for a while. Small-talk topic: "${STR.en.idleTopics[Math.floor(Math.random() * STR.en.idleTopics.length)]}". Never repeat anything similar to your previous lines — a completely fresh sentence.`,
     evAskIdle: 'It has been quiet for a while. Casually ask how the user is doing, their mood, or whether they need a break.',
     evAskManual: 'The user pressed the ask button. Ask something you are curious about right now.',
     evReact: a => `The user just answered '${a}' to your question. React accordingly.`,
@@ -299,6 +323,8 @@ async function llama(messages, maxTok) {
     max_tokens: Math.max(maxTok || 0, +settings.maxTokens || 0, TOK_FLOOR),
     messages,
     stream: false,
+    presence_penalty: 0.6,   // 직전 대사 반복 억제
+    frequency_penalty: 0.3,
     // Qwen3 등 thinking 모델의 think 비활성화 (미지원 모델은 무시됨)
     chat_template_kwargs: { enable_thinking: false },
   };
@@ -485,7 +511,7 @@ async function doAsk(state, topic) {
     try { q = await genAsk(state, topic); }       // JSON 생성 1회 재시도
     catch (e) {
       log('info', `ask generation failed twice (${e.message}) — falling back to chatter`);
-      return speak(state, L().evIdle, 'idle');     // 실패 시 일반 잡담으로 대체
+      return speak(state, L().evIdle(), 'idle');   // 실패 시 일반 잡담으로 대체
     }
   }
   log('ask', `${q.text}  [${q.options.join(' / ')}]`);
@@ -551,7 +577,7 @@ async function tick() {
         await doAsk(state, L().evAskIdle);
         lastSpoke = Date.now();
       } else {
-        await speak(state, L().evIdle, 'idle');
+        await speak(state, L().evIdle(), 'idle');
       }
     }
   } catch (e) {
