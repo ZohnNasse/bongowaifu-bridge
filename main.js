@@ -184,13 +184,17 @@ class MCP {
 }
 
 // ─────────── LLM ───────────
+const TOK_FLOOR = 512; // reasoning 모델 think 소모 대비 최소 출력 토큰
+
 async function llama(messages, maxTok) {
   const body = {
     model: settings.llamaModel,
     temperature: +settings.temperature,
-    max_tokens: maxTok || +settings.maxTokens,
+    max_tokens: Math.max(maxTok || 0, +settings.maxTokens || 0, TOK_FLOOR),
     messages,
     stream: false,
+    // Qwen3 등 thinking 모델의 think 비활성화 (미지원 모델은 무시됨)
+    chat_template_kwargs: { enable_thinking: false },
   };
   const r = await fetch(settings.llamaUrl, {
     method: 'POST',
@@ -199,7 +203,14 @@ async function llama(messages, maxTok) {
   });
   if (!r.ok) throw new Error(`llama HTTP ${r.status}`);
   const j = await r.json();
-  return (j.choices?.[0]?.message?.content || '').trim();
+  const choice = j.choices?.[0] || {};
+  const msg = choice.message || {};
+  const out = (msg.content || '').trim();
+  if (!stripThink(out)) {
+    // 디버그: 왜 비었는지 채팅창 로그로 노출
+    log('error', `llama debug — finish_reason: ${choice.finish_reason}, content: "${out.slice(0, 60)}", reasoning_content: ${msg.reasoning_content ? msg.reasoning_content.length + ' chars (think에 토큰 소진)' : 'none'}`);
+  }
+  return out;
 }
 
 // 모델 출력 정리
