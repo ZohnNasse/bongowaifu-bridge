@@ -1,0 +1,12 @@
+{
+  "name": "bongowaifu-bridge",
+  "version": "1.0.0",
+  "description": "BongoWaifu <-> local llama-server auto-chat bridge",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron ."
+  },
+  "devDependencies": {
+    "electron": "^31.0.0"
+  }
+}
