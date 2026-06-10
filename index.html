@@ -123,7 +123,10 @@
       </div>
     </fieldset>
 
-    <button id="btnSave" class="primary" style="align-self:flex-start" data-i18n="btnSave"></button>
+    <div class="row" style="align-items:center">
+      <button id="btnSave" class="primary" data-i18n="btnSave"></button>
+      <span id="saveMsg" style="color:#4ade80;font-size:13px;opacity:0;transition:opacity .3s"></span>
+    </div>
   </div>
 </main>
 
@@ -299,6 +302,12 @@ $('btnSave').onclick = async () => {
   FIELDS_CHK.forEach(k => s[k] = $(k).checked);
   const r = await window.api.saveSettings(s);
   applyLang(s.language);
+  // 설정 탭 안에서 바로 보이는 저장 피드백
+  const m = $('saveMsg');
+  m.textContent = r.ok ? '✓ ' + t('msgSaved') : '⚠ ' + r.error;
+  m.style.color = r.ok ? '#4ade80' : '#ef4444';
+  m.style.opacity = 1;
+  setTimeout(() => m.style.opacity = 0, 2500);
   addMsg('sys', r.ok ? t('msgSaved') : '⚠ ' + r.error);
 };
 

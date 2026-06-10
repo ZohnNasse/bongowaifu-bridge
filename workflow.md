@@ -42,3 +42,7 @@ Development log for BongoWaifu Bridge. Newest entries at the bottom.
 - Fixed `invalid_button_count` from `ask_and_wait`: the game requires 2–4 buttons but the model sometimes produced 0–1 options. Options are now trimmed, deduped, capped at 4, and padded with default Yes/No when fewer than 2 remain.
 - `invalid_button_count` persisted even with 2 padded options → the argument names were guessed (`{text, options}`) and likely wrong, so the game saw 0 buttons. The bridge now reads the real `ask_and_wait` input schema from `tools/list` on connect, auto-picks the text/array parameter names (text|question|message|prompt / options|buttons|choices|answers), and logs the discovered schema to the chat window.
 - Intermittent ask failures (LLM doesn't always emit valid JSON): question generation now retries once, and falls back to plain idle chatter if both attempts fail — the trigger never silently dies.
+
+## 2026-06-10 — Settings save feedback
+
+- Save button now shows an inline "✓ Settings saved" (green, fades out after 2.5s) right next to it — previously the confirmation only appeared in the chat tab where it wasn't visible.
