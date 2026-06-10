@@ -10,6 +10,7 @@ let busy = false;            // LLM/ask 중복 호출 방지
 let mcp = null;
 let lastHotLevel = 0;
 let hotFull = false;       // 게이지 만땅 이벤트 1회 발화용
+let idleBag = [];          // 잡담 주제 셔플백 — 전부 소진해야 같은 주제 재등장
 let seenAchv = new Set();
 let lastSpoke = 0;
 let sessionStart = 0;
@@ -63,6 +64,13 @@ function bumpAff(d) {
   saveMemory();
 }
 function setMood(m) { mood = m; }
+
+// 잡담 주제: 셔플백 방식 — 10개를 다 쓰기 전엔 같은 주제 반복 없음
+function pickIdleTopic() {
+  const topics = L().idleTopics;
+  if (!idleBag.length) idleBag = topics.map((_, i) => i).sort(() => Math.random() - 0.5);
+  return topics[idleBag.pop()];
+}
 
 // ─────────── memory.md (장기기억 — Honcho식 사실 추출) ───────────
 let memMd = '';
@@ -168,7 +176,7 @@ const STR = {
       '사용자를 살짝 놀리는 장난',
       '계절이나 날씨 이야기',
     ],
-    evIdle: () => `한동안 조용했다. 잡담 주제: "${STR.ko.idleTopics[Math.floor(Math.random() * STR.ko.idleTopics.length)]}". 직전 대사들과 비슷한 말 반복 절대 금지 — 완전히 새로운 문장으로.`,
+    evIdle: t => `한동안 조용했다. 잡담 주제: "${t}". 직전 대사들과 비슷한 말 반복 절대 금지 — 완전히 새로운 문장으로.`,
     evAskIdle: '한동안 조용했다. 사용자 근황이나 기분, 휴식 여부 등을 가볍게 묻는다.',
     evAskManual: '사용자가 직접 질문 버튼을 눌렀다. 지금 궁금한 것을 묻는다.',
     evReact: a => `사용자가 방금 질문에 '${a}'라고 답했다. 그에 맞게 반응한다.`,
@@ -217,7 +225,7 @@ const STR = {
       'lightly teasing the user',
       'the season or the weather',
     ],
-    evIdle: () => `It has been quiet for a while. Small-talk topic: "${STR.en.idleTopics[Math.floor(Math.random() * STR.en.idleTopics.length)]}". Never repeat anything similar to your previous lines — a completely fresh sentence.`,
+    evIdle: t => `It has been quiet for a while. Small-talk topic: "${t}". Never repeat anything similar to your previous lines — a completely fresh sentence.`,
     evAskIdle: 'It has been quiet for a while. Casually ask how the user is doing, their mood, or whether they need a break.',
     evAskManual: 'The user pressed the ask button. Ask something you are curious about right now.',
     evReact: a => `The user just answered '${a}' to your question. React accordingly.`,
@@ -330,6 +338,8 @@ async function llama(messages, maxTok, temp) {
     stream: false,
     presence_penalty: 0.6,   // 직전 대사 반복 억제
     frequency_penalty: 0.3,
+    repeat_penalty: 1.15,    // llama.cpp 전용 — 토큰 단위 반복 억제 (타 서버는 무시)
+    min_p: 0.05,             // 낮은 확률 토큰도 허용해 다양성 확보
     // Qwen3 등 thinking 모델의 think 비활성화 (미지원 모델은 무시됨)
     chat_template_kwargs: { enable_thinking: false },
   };
@@ -453,10 +463,17 @@ function sysPrompt(state) {
 }
 
 async function genLine(state, event, temp) {
+  // 최근에 한 말을 명시적 금지 목록으로 제공
+  const prev = memory.recent.filter(m => m.who === 'waifu').slice(-3).map(m => `- ${m.text}`).join('\n');
+  const ban = prev
+    ? (settings.language === 'en'
+        ? `\nYou already said these — do NOT repeat their content or phrasing:\n${prev}`
+        : `\n최근에 이미 한 말 — 내용도 표현도 반복 금지:\n${prev}`)
+    : '';
   const msgs = [
     { role: 'system', content: sysPrompt(state) },
     ...histMsgs(10), // 자동 발화는 최근 10줄만 — 과거 대사를 모범답안처럼 따라하는 것 방지
-    { role: 'user', content: L().lineInstr(event) },
+    { role: 'user', content: L().lineInstr(event) + ban },
   ];
   // reasoning 모델이 think에 토큰을 소모해도 본문이 나오도록 최소 300 보장
   const line = cleanLine(await llama(msgs, Math.max(+settings.maxTokens || 0, 300), temp), 120);
@@ -542,7 +559,7 @@ async function doAsk(state, topic) {
     try { q = await genAsk(state, topic); }       // JSON 생성 1회 재시도
     catch (e) {
       log('info', `ask generation failed twice (${e.message}) — falling back to chatter`);
-      return speak(state, L().evIdle(), 'idle');   // 실패 시 일반 잡담으로 대체
+      return speak(state, L().evIdle(pickIdleTopic()), 'idle'); // 실패 시 일반 잡담으로 대체
     }
   }
   log('ask', `${q.text}  [${q.options.join(' / ')}]`);
@@ -608,7 +625,7 @@ async function tick() {
         await doAsk(state, L().evAskIdle);
         lastSpoke = Date.now();
       } else {
-        await speak(state, L().evIdle(), 'idle');
+        await speak(state, L().evIdle(pickIdleTopic()), 'idle');
       }
     }
   } catch (e) {

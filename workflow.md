@@ -102,4 +102,5 @@ Development log for BongoWaifu Bridge. Newest entries at the bottom.
 - Past situation memos ('event' entries) are no longer fed back into generation history — the model kept reacting to stale situations instead of moving on (the current situation always arrives fresh via the instruction).
 - Auto lines/asks now see only the last 10 history lines (full history was acting as few-shot examples of itself); chat keeps the full window.
 - Post-generation similarity check (substring + 2-gram overlap >0.6 vs last 5 spoken lines): a too-similar line is regenerated once with a "say something completely different" note and temperature +0.25.
+- Round 2 (still repeating): idle topics switched from pure random to a shuffle-bag (no topic repeats until all 10 are used); last 3 spoken lines injected into every generation as an explicit do-not-repeat list; added llama.cpp sampler params `repeat_penalty: 1.15` and `min_p: 0.05`. Remaining repetition beyond this is a model-capability limit.
 - Summary prompt now also preserves facts the character invented about herself (job, hobbies, anecdotes), not just facts about the user — keeps her self-made lore consistent across sessions.
