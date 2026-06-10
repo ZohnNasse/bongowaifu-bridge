@@ -46,3 +46,7 @@ Development log for BongoWaifu Bridge. Newest entries at the bottom.
 ## 2026-06-10 — Settings save feedback
 
 - Save button now shows an inline "✓ Settings saved" (green, fades out after 2.5s) right next to it — previously the confirmation only appeared in the chat tab where it wasn't visible.
+
+## 2026-06-10 — System prompt restructure (persona leaking)
+
+- Small local models were reciting the persona settings verbatim instead of acting them out. The system prompt (both languages) is now structured as [PROFILE] (marked "never say out loud") + [RULES] (no self-description of settings, one line of dialogue only, stay in character) so settings act as guidelines rather than content to repeat.
