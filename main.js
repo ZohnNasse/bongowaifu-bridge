@@ -325,7 +325,16 @@ async function speak(state, event, tag) {
 }
 
 async function doAsk(state, topic) {
-  const q = await genAsk(state, topic);
+  let q;
+  try {
+    q = await genAsk(state, topic);
+  } catch {
+    try { q = await genAsk(state, topic); }       // JSON 생성 1회 재시도
+    catch (e) {
+      log('info', `ask generation failed twice (${e.message}) — falling back to chatter`);
+      return speak(state, L().evIdle, 'idle');     // 실패 시 일반 잡담으로 대체
+    }
+  }
   log('ask', `${q.text}  [${q.options.join(' / ')}]`);
   addMemory('waifu', `(Q) ${q.text} options: ${q.options.join('/')}`);
   let answer = '(no answer / dismissed)';
