@@ -281,13 +281,16 @@ async function maybeSummarize() {
   const old = memory.recent.splice(0, memory.recent.length - lim);
   const text = old.map(m => `${m.who}: ${m.text}`).join('\n');
   try {
-    memory.summary = stripThink(await llama([
+    const sum = stripThink(await llama([
       { role: 'system', content: L().sumSys },
       { role: 'user', content: L().sumUser(memory.summary, text) },
     ], 500));
+    if (!sum) throw new Error('empty summary');   // 빈 요약이면 기억 날리지 않음
+    memory.summary = sum;
     log('info', 'memory summarized');
-  } catch {
+  } catch (e) {
     memory.recent.unshift(...old); // 실패 시 되돌림
+    log('info', `summarize failed, memory kept raw: ${e.message}`);
   }
   saveMemory();
 }

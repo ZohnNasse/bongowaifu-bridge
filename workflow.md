@@ -63,4 +63,8 @@ Development log for BongoWaifu Bridge. Newest entries at the bottom.
 - **Mood** (session-scoped: calm/happy/thrilled/bored): gauge tier-up → happy, gauge max → thrilled, achievement → happy, long silence → bored, user interaction resets to calm. Injected into the prompt to color tone.
 - Affection (♥ n/100) is visible in Settings → memory view.
 - Affection now also shows permanently in the header (♥ n, pink), refreshed every 10s.
+
+## 2026-06-10 — Memory loss bug
+
+- If the summarization model returned an empty string, the old lines had already been spliced out of recent memory and were lost forever. Empty summaries now throw, restoring the spliced lines, with an on-screen log. Memory is never destroyed by a failed summarize.
 - Summary prompt now also preserves facts the character invented about herself (job, hobbies, anecdotes), not just facts about the user — keeps her self-made lore consistent across sessions.
