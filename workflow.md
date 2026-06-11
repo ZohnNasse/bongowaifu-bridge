@@ -113,4 +113,8 @@ Development log for BongoWaifu Bridge. Newest entries at the bottom.
 - The character had no sense of place — she'd flip between home and classroom randomly. Added a daily schedule system: once per day the LLM generates a realistic timeline (`schedule.json`) of 6–10 slots {start, end, place, activity, with, transport} based on persona + weekday, designed to differ each day (different friends/places/events, travel as its own slots, no gaps).
 - `currentSlot()` resolves the slot covering the current time; injected at the very top of the system prompt as [RIGHT NOW] ("she is at X doing Y with Z; not doing anything elsewhere") for location/activity consistency.
 - Auto-regenerates when the date changes (checked on start and in the tick loop). Settings → Daily schedule: enable toggle, view current schedule (▶ marks active slot), "Regenerate today" button. Cached per-day = one extra LLM call/day.
+
+## 2026-06-10 — VOICEVOX Korean→Japanese voicing
+
+- VOICEVOX only speaks Japanese, so Korean bubbles produced no/garbled audio (the test worked only because it sent a Japanese sample). Now in VOICEVOX mode each line is translated to Japanese (`toJapanese()` in main, low-temp LLM call) before synthesis — the bubble text stays Korean, only the voice is Japanese. Lines already lacking Hangul/Latin are passed through unchanged.
 - Summary prompt now also preserves facts the character invented about herself (job, hobbies, anecdotes), not just facts about the user — keeps her self-made lore consistent across sessions.

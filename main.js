@@ -810,13 +810,26 @@ ipcMain.handle('ask:manual', async () => {
   finally { busy = false; }
 });
 
+// VOICEVOX는 일본어 전용 — 한/영 대사를 일본어로 번역해 읽기
+async function toJapanese(text) {
+  if (!/[가-힣a-zA-Z]/.test(text)) return text; // 한글·영문 없으면(이미 일본어 등) 그대로
+  try {
+    const out = stripThink(await llama([
+      { role: 'system', content: '다음 대사를 자연스러운 일본어 구어체로 번역. 번역문만 출력, 따옴표·설명 금지.' },
+      { role: 'user', content: text },
+    ], 200, 0.3));
+    return out.split('\n')[0].trim() || text;
+  } catch { return text; }
+}
+
 // TTS 합성 (메인 프로세스에서 — CORS 회피). 성공 시 base64 오디오, 실패/미지원 시 null(렌더러가 OS 폴백)
 ipcMain.handle('tts:synth', async (_, text) => {
   try {
     if (settings.ttsMode === 'voicevox') {
       const base = (settings.ttsUrl || 'http://127.0.0.1:50021').replace(/\/$/, '');
       const sp = +settings.ttsSpeaker || 3;
-      const q = await fetch(`${base}/audio_query?text=${encodeURIComponent(text)}&speaker=${sp}`, { method: 'POST' });
+      const jp = await toJapanese(text); // 일본어로 번역 후 합성
+      const q = await fetch(`${base}/audio_query?text=${encodeURIComponent(jp)}&speaker=${sp}`, { method: 'POST' });
       if (!q.ok) throw new Error(`audio_query ${q.status}`);
       const query = await q.json();
       query.speedScale = +settings.ttsRate || 1;
