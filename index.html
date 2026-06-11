@@ -114,10 +114,20 @@
 
     <fieldset><legend data-i18n="legTts"></legend>
       <div class="row"><label><input type="checkbox" id="ttsEnable"> <span data-i18n="chkTts"></span></label></div>
-      <div class="row"><label data-i18n="lblTtsUrl"></label><input type="text" id="ttsUrl" placeholder="http://127.0.0.1:9880/tts"></div>
+      <div class="row"><label data-i18n="lblTtsMode"></label>
+        <select id="ttsMode">
+          <option value="os" data-i18n="ttsModeOs"></option>
+          <option value="voicevox">VOICEVOX</option>
+          <option value="custom" data-i18n="ttsModeCustom"></option>
+        </select>
+      </div>
+      <div class="row"><label data-i18n="lblTtsUrl"></label><input type="text" id="ttsUrl" placeholder="http://127.0.0.1:50021"></div>
       <div class="hint" data-i18n="hintTts"></div>
+      <div class="row"><label data-i18n="lblTtsSpeaker"></label><input type="number" id="ttsSpeaker" min="0" max="100"></div>
+      <div class="hint" data-i18n="hintTtsSpeaker"></div>
       <div class="row"><label data-i18n="lblTtsVoice"></label><input type="text" id="ttsVoice"></div>
       <div class="row"><label data-i18n="lblTtsRate"></label><input type="number" id="ttsRate" step="0.1" min="0.5" max="2"></div>
+      <button id="btnTtsTest" data-i18n="btnTtsTest"></button>
     </fieldset>
 
     <fieldset><legend data-i18n="legMem"></legend>
@@ -141,8 +151,8 @@
 
 <script>
 const $ = id => document.getElementById(id);
-const FIELDS_TXT = ['language','personaName','personaAge','userCall','personality','speechStyle','llamaUrl','llamaModel','ttsUrl','ttsVoice'];
-const FIELDS_NUM = ['bongoPort','temperature','maxTokens','pollSec','idleSec','askChance','memRecent','ttsRate'];
+const FIELDS_TXT = ['language','personaName','personaAge','userCall','personality','speechStyle','llamaUrl','llamaModel','ttsMode','ttsUrl','ttsVoice'];
+const FIELDS_NUM = ['bongoPort','temperature','maxTokens','pollSec','idleSec','askChance','memRecent','ttsRate','ttsSpeaker'];
 const FIELDS_CHK = ['trigGreet','trigHot','trigAchv','trigIdle','trigAsk','memSummary','ttsEnable'];
 let running = false;
 
@@ -159,8 +169,11 @@ const I18N = {
     legTrig:'발화 트리거', lblPoll:'폴링 주기(초)', lblIdle:'잡담 간격(초)', lblAskChance:'질문 확률(0~1)',
     hintAskChance:'잡담 타이밍에 일반 대사 대신 버튼 질문(ask_and_wait)이 나갈 확률',
     chkGreet:'시작 인사', chkHot:'게이지 반응', chkAchv:'업적 축하', chkIdle:'잡담', chkAsk:'질문 허용',
-    legTts:'음성 (TTS)', chkTts:'TTS 사용 (모든 발화 읽어줌)', lblTtsUrl:'TTS 서버 URL', lblTtsVoice:'음성 이름', lblTtsRate:'속도 (0.5~2)',
-    hintTts:'비우면 Windows 내장 음성 사용. 서버 연동 시 POST {text, voice}에 오디오로 응답하는 엔드포인트 입력 (GPT-SoVITS 등). 서버 실패 시 자동으로 내장 음성 폴백.',
+    legTts:'음성 (TTS)', chkTts:'TTS 사용 (모든 발화 읽어줌)', lblTtsMode:'방식', ttsModeOs:'OS 내장 음성', ttsModeCustom:'커스텀 서버',
+    lblTtsUrl:'서버 URL', lblTtsVoice:'음성 이름(OS/커스텀)', lblTtsRate:'속도 (0.5~2)',
+    lblTtsSpeaker:'VOICEVOX 화자 번호', hintTtsSpeaker:'VOICEVOX 앱의 화자 목록 순서대로 번호 (예: ずんだもん 노멀=3). 모르면 3으로 시작.',
+    hintTts:'OS=Windows 내장 음성(자원 0). VOICEVOX=실행 중인 VOICEVOX 엔진(기본 http://127.0.0.1:50021) 사용, CPU 동작이라 GPU 안 씀. 커스텀=POST {text,voice}에 오디오 응답하는 서버. 실패 시 OS 음성 폴백.',
+    btnTtsTest:'음성 테스트',
     legMem:'메모리', lblMemRecent:'최근 기억 수(줄)', chkMemSummary:'장기 요약 사용',
     hintMem:'최근 기억이 1.5배를 넘으면 오래된 기록을 로컬 모델이 요약해 보관 (32k 컨텍스트 기준 100줄도 여유)',
     lblMemView:'현재 장기 기억', btnMemRefresh:'기억 보기 새로고침', btnMemClear:'기억 전체 삭제',
@@ -182,8 +195,11 @@ const I18N = {
     legTrig:'Speech triggers', lblPoll:'Poll interval (s)', lblIdle:'Chatter interval (s)', lblAskChance:'Ask chance (0–1)',
     hintAskChance:'Chance an idle chatter becomes a button question (ask_and_wait)',
     chkGreet:'Greeting', chkHot:'Gauge reaction', chkAchv:'Achievements', chkIdle:'Chatter', chkAsk:'Allow asks',
-    legTts:'Voice (TTS)', chkTts:'Enable TTS (reads all speech)', lblTtsUrl:'TTS server URL', lblTtsVoice:'Voice name', lblTtsRate:'Rate (0.5–2)',
-    hintTts:'Leave URL empty to use the built-in OS voice. For a server, enter an endpoint that accepts POST {text, voice} and returns audio (GPT-SoVITS etc.). Falls back to the OS voice on failure.',
+    legTts:'Voice (TTS)', chkTts:'Enable TTS (reads all speech)', lblTtsMode:'Mode', ttsModeOs:'OS built-in voice', ttsModeCustom:'Custom server',
+    lblTtsUrl:'Server URL', lblTtsVoice:'Voice name (OS/custom)', lblTtsRate:'Rate (0.5–2)',
+    lblTtsSpeaker:'VOICEVOX speaker ID', hintTtsSpeaker:'Speaker number from the VOICEVOX app list (e.g. Zundamon normal=3). Start with 3 if unsure.',
+    hintTts:'OS=Windows built-in voice (no resources). VOICEVOX=use the running VOICEVOX engine (default http://127.0.0.1:50021), CPU-based so no GPU. Custom=server that returns audio for POST {text,voice}. Falls back to OS voice on failure.',
+    btnTtsTest:'Test voice',
     legMem:'Memory', lblMemRecent:'Recent memory (lines)', chkMemSummary:'Long-term summary',
     hintMem:'When recent memory exceeds 1.5x, older lines are summarized by the local model (with 32k context even 100 lines is fine)',
     lblMemView:'Current long-term memory', btnMemRefresh:'Refresh memory view', btnMemClear:'Clear all memory',
@@ -351,24 +367,25 @@ window.api.onTts(({ text }) => {
 });
 
 async function playTts(text) {
-  if (ttsCfg.url) {
-    try {
-      const r = await fetch(ttsCfg.url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text, voice: ttsCfg.voice || undefined }),
-      });
-      if (!r.ok) throw 0;
-      const blob = await r.blob();
-      if (!blob.type.includes('audio') && !blob.type.includes('octet')) throw 0;
-      await new Promise((res, rej) => {
-        const a = new Audio(URL.createObjectURL(blob));
-        a.playbackRate = ttsCfg.rate || 1;
-        a.onended = res; a.onerror = rej;
-        a.play().catch(rej);
-      });
-      return;
-    } catch { /* OS 음성으로 폴백 */ }
+  if (ttsCfg.mode !== 'os') {
+    // 메인 프로세스에서 합성 (voicevox/custom) — CORS 회피
+    const res = await window.api.ttsSynth(text);
+    if (res && res.audio) {
+      try {
+        const bin = atob(res.audio);
+        const arr = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+        const blob = new Blob([arr], { type: res.mime || 'audio/wav' });
+        await new Promise((ok, no) => {
+          const a = new Audio(URL.createObjectURL(blob));
+          a.playbackRate = ttsCfg.rate || 1;
+          a.onended = ok; a.onerror = no;
+          a.play().catch(no);
+        });
+        return;
+      } catch { /* OS 음성으로 폴백 */ }
+    }
+    // res가 null이면 OS 폴백
   }
   await new Promise(res => {
     const u = new SpeechSynthesisUtterance(text);
@@ -383,8 +400,22 @@ async function playTts(text) {
 }
 
 function syncTtsCfg(s) {
-  ttsCfg = { enable: !!s.ttsEnable, url: s.ttsUrl || '', voice: s.ttsVoice || '', rate: +s.ttsRate || 1 };
+  ttsCfg = { enable: !!s.ttsEnable, mode: s.ttsMode || 'os', voice: s.ttsVoice || '', rate: +s.ttsRate || 1 };
 }
+
+// 음성 테스트 버튼 (현재 입력값을 임시 저장 후 한 줄 재생)
+$('btnTtsTest').onclick = async () => {
+  const s = {};
+  FIELDS_TXT.forEach(k => s[k] = $(k).value);
+  FIELDS_NUM.forEach(k => s[k] = +$(k).value);
+  FIELDS_CHK.forEach(k => s[k] = $(k).checked);
+  await window.api.saveSettings(s);
+  syncTtsCfg(s);
+  ttsCfg.enable = true; // 테스트는 강제 재생
+  const sample = s.ttsMode === 'voicevox' ? 'こんにちは、聞こえますか？'
+               : lang === 'en' ? 'Hello, can you hear me?' : '안녕, 잘 들려?';
+  playTts(sample);
+};
 
 // 헤더 호감도 표시 (10초마다 + 시작 시 갱신)
 async function refreshAff() {

@@ -103,4 +103,8 @@ Development log for BongoWaifu Bridge. Newest entries at the bottom.
 - Auto lines/asks now see only the last 10 history lines (full history was acting as few-shot examples of itself); chat keeps the full window.
 - Post-generation similarity check (substring + 2-gram overlap >0.6 vs last 5 spoken lines): a too-similar line is regenerated once with a "say something completely different" note and temperature +0.25.
 - Round 2 (still repeating): idle topics switched from pure random to a shuffle-bag (no topic repeats until all 10 are used); last 3 spoken lines injected into every generation as an explicit do-not-repeat list; added llama.cpp sampler params `repeat_penalty: 1.15` and `min_p: 0.05`. Remaining repetition beyond this is a model-capability limit.
+
+## 2026-06-10 — VOICEVOX TTS mode
+
+- Added a dedicated VOICEVOX mode (TTS mode dropdown: OS / VOICEVOX / Custom). Synthesis runs in the main process to avoid CORS: VOICEVOX is a 2-step call (`/audio_query` then `/synthesis`, speedScale from rate), returned as base64 audio the renderer plays; custom mode posts `{text,voice}`. Any failure falls back to the OS voice. Settings expose mode, server URL (default 127.0.0.1:50021), speaker ID, voice name, rate, and a "Test voice" button. VOICEVOX is CPU-based — chosen because the user's 8GB VRAM is already used by the LLM.
 - Summary prompt now also preserves facts the character invented about herself (job, hobbies, anecdotes), not just facts about the user — keeps her self-made lore consistent across sessions.

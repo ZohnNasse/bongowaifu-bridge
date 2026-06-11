@@ -20,6 +20,7 @@ const SETTINGS_PATH = () => path.join(app.getPath('userData'), 'settings.json');
 const MEMORY_PATH   = () => path.join(app.getPath('userData'), 'memory.json');
 const MEMMD_PATH    = () => path.join(app.getPath('userData'), 'memory.md');
 const PERSONA_PATH  = () => path.join(app.getPath('userData'), 'persona.md');
+const SCHED_PATH    = () => path.join(app.getPath('userData'), 'schedule.json');
 
 const DEFAULTS = {
   // 언어 ('ko' | 'en') — UI와 캐릭터 발화 언어
@@ -48,10 +49,14 @@ const DEFAULTS = {
   // 메모리
   memRecent: 40,
   memSummary: true,
+  // 스케줄 (하루 일과)
+  schedEnable: true,
   // TTS
   ttsEnable: false,
-  ttsUrl: '',        // 비우면 OS 내장 음성. 채우면 POST {text, voice} → audio 응답 기대, 실패 시 OS 폴백
-  ttsVoice: '',      // 서버 음성 이름 또는 OS 음성 이름 일부 (예: Heami)
+  ttsMode: 'os',     // 'os' | 'voicevox' | 'custom'
+  ttsUrl: '',        // custom: POST {text,voice}→audio / voicevox: 엔진 주소(기본 http://127.0.0.1:50021)
+  ttsVoice: '',      // OS/custom 음성 이름
+  ttsSpeaker: 3,     // voicevox 화자 번호 (예: ずんだもん 노멀=3)
   ttsRate: 1.0,
 };
 
@@ -742,6 +747,38 @@ ipcMain.handle('ask:manual', async () => {
     return { ok: true };
   } catch (e) { return { ok: false, error: e.message }; }
   finally { busy = false; }
+});
+
+// TTS 합성 (메인 프로세스에서 — CORS 회피). 성공 시 base64 오디오, 실패/미지원 시 null(렌더러가 OS 폴백)
+ipcMain.handle('tts:synth', async (_, text) => {
+  try {
+    if (settings.ttsMode === 'voicevox') {
+      const base = (settings.ttsUrl || 'http://127.0.0.1:50021').replace(/\/$/, '');
+      const sp = +settings.ttsSpeaker || 3;
+      const q = await fetch(`${base}/audio_query?text=${encodeURIComponent(text)}&speaker=${sp}`, { method: 'POST' });
+      if (!q.ok) throw new Error(`audio_query ${q.status}`);
+      const query = await q.json();
+      query.speedScale = +settings.ttsRate || 1;
+      const s = await fetch(`${base}/synthesis?speaker=${sp}`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(query),
+      });
+      if (!s.ok) throw new Error(`synthesis ${s.status}`);
+      const buf = Buffer.from(await s.arrayBuffer());
+      return { audio: buf.toString('base64'), mime: 'audio/wav' };
+    }
+    if (settings.ttsMode === 'custom' && settings.ttsUrl) {
+      const r = await fetch(settings.ttsUrl, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text, voice: settings.ttsVoice || undefined }),
+      });
+      if (!r.ok) throw new Error(`tts ${r.status}`);
+      const buf = Buffer.from(await r.arrayBuffer());
+      return { audio: buf.toString('base64'), mime: r.headers.get('content-type') || 'audio/wav' };
+    }
+  } catch (e) {
+    log('error', `TTS failed (${e.message}) — OS 음성으로 폴백`);
+  }
+  return null; // OS 음성 사용
 });
 
 ipcMain.handle('memory:get', () => ({
