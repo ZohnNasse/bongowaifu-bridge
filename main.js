@@ -149,7 +149,7 @@ async function ensureSchedule(force) {
 
 // 끝난 일과 시간대에 실제 있었던 일(episode)을 생성해 기억에 저장
 async function maybeNarrateEpisode() {
-  if (schedBusy || !settings.schedEnable || schedule.date !== todayStr()) return;
+  if (fgActive || schedBusy || !settings.schedEnable || schedule.date !== todayStr()) return;
   const n = new Date(); const cur = n.getHours() * 60 + n.getMinutes();
   const toMin = t => { const [h, m] = String(t).split(':').map(Number); return h * 60 + (m || 0); };
   schedule.narrated = schedule.narrated || [];
@@ -193,6 +193,8 @@ function currentSlot() {
 
 // 사용자 메시지에서 사실 추출 → memory.md User Facts에 즉시 누적 (백그라운드)
 async function extractUserFacts(text) {
+  if (fgActive) return;                 // 발화 중이면 양보 (속도 우선)
+  if (String(text).trim().length < 4) return; // 너무 짧은 입력은 추출 가치 낮음
   try {
     const j = looseJson(await llama([
       { role: 'system', content: L().factSys },
@@ -245,8 +247,8 @@ function recentEntries(s, n) {
 function memForPrompt() {
   if (!memMd.trim()) return '';
   const p = parseMd(memMd);
-  const CAP = 6500;
-  let epN = 8, feN = 6, diN = 5;
+  const CAP = 2800; // 프롬프트 비대화 방지 (속도)
+  let epN = 4, feN = 3, diN = 2;
   const build = () =>
     `[사용자에 대한 기억]\n${p.facts}\n[가족·친구]\n${p.rel}\n[나의 설정]\n${p.lore}\n` +
     `[최근 있었던 일]\n${recentEntries(p.episodes, epN)}\n[대화에서 느낀 감정]\n${recentEntries(p.feelings, feN)}\n` +
@@ -500,8 +502,18 @@ class MCP {
 
 // ─────────── LLM ───────────
 const TOK_FLOOR = 512; // reasoning 모델 think 소모 대비 최소 출력 토큰
+let fgActive = 0;       // 발화/채팅 등 '전경' LLM 작업 수 — 백그라운드 작업이 양보하도록
+const fgWrap = p => { fgActive++; return Promise.resolve(p).finally(() => fgActive--); };
 
-async function llama(messages, maxTok, temp) {
+// 모든 LLM 요청을 한 줄로 직렬화 — 단일 슬롯 로컬 서버에 동시 요청 몰림 방지
+let llmChain = Promise.resolve();
+function llama(messages, maxTok, temp) {
+  const p = llmChain.then(() => llamaRaw(messages, maxTok, temp));
+  llmChain = p.catch(() => {}); // 한 요청이 실패해도 큐는 계속
+  return p;
+}
+
+async function llamaRaw(messages, maxTok, temp) {
   const body = {
     model: settings.llamaModel,
     temperature: temp ?? +settings.temperature,
@@ -515,11 +527,22 @@ async function llama(messages, maxTok, temp) {
     // Qwen3 등 thinking 모델의 think 비활성화 (미지원 모델은 무시됨)
     chat_template_kwargs: { enable_thinking: false },
   };
-  const r = await fetch(settings.llamaUrl, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
+  // 응답이 영원히 안 오면 끊기 위한 타임아웃 (기본 120초)
+  const ctrl = new AbortController();
+  const to = setTimeout(() => ctrl.abort(), 120000);
+  let r;
+  try {
+    r = await fetch(settings.llamaUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      signal: ctrl.signal,
+    });
+  } catch (e) {
+    throw new Error(e.name === 'AbortError'
+      ? 'llama 응답 시간 초과(120s) — 모델이 멈췄거나 너무 느림'
+      : `llama 연결 실패 — llama-server(${settings.llamaUrl}) 실행/주소 확인`);
+  } finally { clearTimeout(to); }
   if (!r.ok) throw new Error(`llama HTTP ${r.status}`);
   const j = await r.json();
   const choice = j.choices?.[0] || {};
@@ -653,7 +676,7 @@ function sysPrompt(state) {
     const head = settings.language === 'en'
       ? '[CHARACTER SHEET — detailed; takes precedence over the profile above]'
       : '[인물 상세 — 위 설정보다 우선]';
-    sys = sys.replace(marker, `${head}\n${pmd.slice(0, 4000)}\n\n${marker}`);
+    sys = sys.replace(marker, `${head}\n${pmd.slice(0, 2000)}\n\n${marker}`);
   }
   return sys;
 }
@@ -728,15 +751,15 @@ async function sayBubbles(text) {
 }
 
 async function speak(state, event, tag) {
-  let line = await genLine(state, event);
-  // 최근 대사와 너무 비슷하면 1회 재생성 (온도 올려서)
+  let line = await fgWrap(genLine(state, event));
+  // 최근 대사와 너무 비슷할 때만 1회 재생성 (자주 발생하지 않음)
   const prev = memory.recent.filter(m => m.who === 'waifu').slice(-5).map(m => m.text);
   if (prev.some(p => tooSimilar(line, p))) {
     log('info', 'similar line — regenerating');
     const note = settings.language === 'en'
       ? ' (Your draft repeated an earlier line — say something completely different.)'
       : ' (방금 떠올린 문장은 이미 했던 말과 겹침 — 완전히 다른 문장으로.)';
-    line = await genLine(state, event + note, Math.min(2, +settings.temperature + 0.25));
+    line = await fgWrap(genLine(state, event + note, Math.min(2, +settings.temperature + 0.25)));
   }
   await sayBubbles(line);
   addMemory('event', event);
@@ -853,7 +876,6 @@ async function start() {
   lastSpoke = Date.now();
   lastHotLevel = 0;
   hotFull = false;
-  await ensureSchedule(); // 오늘 일과표 준비 (인사 전에)
 
   // 기존 업적 베이스라인
   try {
@@ -861,7 +883,7 @@ async function start() {
     for (const a of st?.achievements || []) if (a.unlocked) seenAchv.add(a.api_name);
   } catch {}
 
-  // 시작 인사
+  // 시작 인사 (먼저 — 스케줄 생성에 막히지 않게)
   if (settings.trigGreet) {
     busy = true;
     try {
@@ -871,6 +893,7 @@ async function start() {
     busy = false;
   }
 
+  ensureSchedule(); // 오늘 일과표는 백그라운드로 (인사를 막지 않음)
   loopTimer = setInterval(tick, Math.max(1, +settings.pollSec) * 1000);
   return { ok: true };
 }
@@ -900,15 +923,15 @@ ipcMain.handle('bridge:status', () => ({ running }));
 ipcMain.handle('chat:send', async (_, text) => {
   bumpAff(1); setMood('neutral'); // 말 걸어주면 호감 +1, 심심함 해소
   addMemory('user', text);
-  extractUserFacts(text); // 비동기 — 답변 생성을 막지 않음
   try {
     let state = {};
     if (mcp) { try { state = await mcp.state(['character']); } catch {} }
     const msgs = [{ role: 'system', content: sysPrompt(state) }, ...histMsgs()];
-    const reply = cleanLine(await llama(msgs, Math.max(+settings.maxTokens || 0, 300)), 600);
+    const reply = cleanLine(await fgWrap(llama(msgs, Math.max(+settings.maxTokens || 0, 300))), 600);
     if (!reply) return { ok: false, error: 'empty reply from model (raise max tokens or disable reasoning/think mode)' };
     addMemory('waifu', reply);
     lastSpoke = Date.now();
+    setTimeout(() => extractUserFacts(text), 1500); // 답변 후 한가할 때 백그라운드로
     if (mcp) { try { await sayBubbles(reply); } catch {} } // 길면 말풍선 2~3개로 분할
     return { ok: true, reply };
   } catch (e) {

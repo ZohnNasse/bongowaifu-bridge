@@ -137,6 +137,18 @@ Development log for BongoWaifu Bridge. Newest entries at the bottom.
 
 - Memory/fact/schedule/etc. extraction was failing ("'w' is not valid JSON" — model dropped quotes around a value) because JSON was generated at the default 0.9 temperature. Added `looseJson()`: strips think, extracts the `{...}`, then attempts parse with escalating repairs (smart→straight quotes, trailing commas, wrapping unquoted values). All JSON-producing calls now run at low temperature (0.3–0.6) and use `looseJson`; memory summarization retries once. Greatly reduces malformed-JSON failures on small local models.
 
+## 2026-06-11 — Performance (slowdown after recent features)
+
+- Each line had become slow because the system prompt ballooned (memory 6500 + persona 4000 chars, processed every call) and background LLM tasks (fact extraction, episode narration) competed with foreground generation on the single-slot local server.
+- Prompt trimmed: memForPrompt cap 6500→2800 (epN/feN/diN 8/6/5→4/3/2), persona.md injection 4000→2000.
+- Added `fgActive` foreground counter (`fgWrap`): speak/chat generations mark themselves foreground; background tasks (`extractUserFacts`, `maybeNarrateEpisode`) skip when a foreground generation is active. Fact extraction also skips trivial (<4 char) inputs and now runs 1.5s after the reply instead of before it (was racing the reply on the same server).
+
+## 2026-06-11 — "fetch failed" / model stuck
+
+- `greet failed: fetch failed` and the model appearing to "work forever" were caused by concurrent requests to a single-slot llama-server: at startup `ensureSchedule()` (relationships + schedule) was awaited *before* the greeting, and background tasks could also fire — the server queued/stalled and some fetches dropped.
+- All LLM calls now go through a serializing queue (`llama()` chains onto `llmChain`) so only one request hits the server at a time; a 120s AbortController timeout frees a hung request and reports a clear message (timeout vs connection-refused).
+- `start()` now sends the greeting first and kicks `ensureSchedule()` in the background (no longer awaited), so the companion greets immediately instead of waiting on schedule generation.
+
 ## 2026-06-10 — Schedule ignoring basic settings (age/role)
 
 - Schedules were generated from `settings.personality` only — name and especially **age** were never passed, so a 16-year-old student could get a "workplace" slot. Added `personaText()` which always composes name + age + how-she-calls-you + personality (+ persona.md if present) and is now used for schedule, relationship, and episode generation. Schedule system prompt also gained explicit rules: match age/role (student→school, never status-inconsistent places), respect weekday/weekend.
