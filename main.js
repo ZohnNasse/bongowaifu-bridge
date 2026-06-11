@@ -107,13 +107,12 @@ async function ensureRelationships() {
   const p = parseMd(memMd);
   if (p.rel.trim()) return;
   try {
-    const raw = stripThink(await llama([
+    const j = looseJson(await llama([
       { role: 'system', content: L().relSys },
       { role: 'user', content: L().relUser(personaText()) },
-    ], 500, 0.9));
-    const m = raw.match(/\{[\s\S]*\}/);
-    if (!m) return;
-    const list = (JSON.parse(m[0]).people || [])
+    ], 500, 0.6));
+    if (!j) return;
+    const list = (j.people || [])
       .filter(x => x && x.name).map(x => `- ${x.name} (${x.relation || ''}): ${x.note || ''}`);
     if (!list.length) return;
     p.rel = list.join('\n');
@@ -133,13 +132,12 @@ async function ensureSchedule(force) {
     await ensureRelationships(); // 친구/가족 먼저 — 일과에 이름이 등장하도록
     const now = new Date();
     const persona = personaText() + '\n등장인물:\n' + parseMd(memMd).rel;
-    const raw = stripThink(await llama([
+    const j = looseJson(await llama([
       { role: 'system', content: L().schedSys },
       { role: 'user', content: L().schedUser(persona, L().dow[now.getDay()], todayStr()) },
-    ], 900, 0.9));
-    const m = raw.match(/\{[\s\S]*\}/);
-    if (!m) throw new Error('JSON 없음 (모델 응답 형식 문제)');
-    const slots = (JSON.parse(m[0]).slots || []).filter(s => s.start && s.end && s.place);
+    ], 900, 0.5));
+    if (!j) throw new Error('JSON 파싱 실패 (모델 응답 형식 문제)');
+    const slots = (j.slots || []).filter(s => s.start && s.end && s.place);
     if (!slots.length) throw new Error('빈 일과표');
     schedule = { date: todayStr(), slots, narrated: [] };
     saveSched();
@@ -196,13 +194,11 @@ function currentSlot() {
 // 사용자 메시지에서 사실 추출 → memory.md User Facts에 즉시 누적 (백그라운드)
 async function extractUserFacts(text) {
   try {
-    const raw = stripThink(await llama([
+    const j = looseJson(await llama([
       { role: 'system', content: L().factSys },
       { role: 'user', content: L().factUser(parseMd(memMd).facts.slice(0, 2000), text) },
-    ], 300));
-    const m = raw.match(/\{[\s\S]*\}/);
-    if (!m) return;
-    const j = JSON.parse(m[0]);
+    ], 300, 0.3));
+    if (!j) return;
     const list = (j.facts || []).map(f => String(f).trim()).filter(Boolean);
     const feeling = String(j.feeling || '').trim();
     const p = parseMd(memMd);
@@ -540,6 +536,25 @@ async function llama(messages, maxTok, temp) {
 function stripThink(t) {
   return t.replace(/<think>[\s\S]*?<\/think>/gi, '').replace(/<\/?think>/gi, '').trim();
 }
+// 로컬 모델이 흘린 JSON을 최대한 복구해 파싱 (실패 시 null)
+function looseJson(raw) {
+  const t = stripThink(raw);
+  const m = t.match(/\{[\s\S]*\}/);
+  if (!m) return null;
+  let s = m[0];
+  const tries = [
+    x => x,
+    x => x.replace(/[""]/g, '"').replace(/['']/g, "'").replace(/,\s*([}\]])/g, '$1'), // 스마트따옴표·끝쉼표
+    x => x.replace(/:\s*([^"\[{\d\s][^,}\]]*?)\s*([,}\]])/g, ': "$1"$2'),               // 따옴표 빠진 값 감싸기
+  ];
+  let cur = s;
+  for (const fix of tries) {
+    cur = fix(cur);
+    try { return JSON.parse(cur); } catch {}
+  }
+  return null;
+}
+
 function cleanLine(t, max) {
   // 여러 줄을 한 대사로 합침 (첫 줄만 쓰면 답이 토막남). 지문/이름표 줄은 제거.
   const joined = stripThink(t).split('\n')
@@ -563,13 +578,13 @@ async function maybeSummarize() {
   const old = memory.recent.splice(0, memory.recent.length - lim);
   const text = old.map(m => `${m.who}: ${m.text}`).join('\n');
   try {
-    const raw = stripThink(await llama([
+    const ask = () => llama([
       { role: 'system', content: L().sumSys },
       { role: 'user', content: L().sumUser(memMd.slice(0, 3000), text) },
-    ], 800));
-    const m = raw.match(/\{[\s\S]*\}/);
-    if (!m) throw new Error('no JSON in extraction');
-    const j = JSON.parse(m[0]);
+    ], 800, 0.3); // JSON은 낮은 온도로
+    let j = looseJson(await ask());
+    if (!j) j = looseJson(await ask()); // 1회 재시도
+    if (!j) throw new Error('JSON 파싱 실패(2회)');
     const p = parseMd(memMd);
     // 사실/설정: 중복 아닌 것만 추가
     for (const f of j.user_facts || [])
@@ -669,10 +684,8 @@ async function genAsk(state, topic) {
     { role: 'user', content: L().askInstr(topic) },
   ];
   // JSON 출력은 토큰이 더 필요 — 최소 300 보장 (reasoning 모델 think 포함 대비)
-  const t = stripThink(await llama(msgs, Math.max(+settings.maxTokens || 0, 300)));
-  const m = t.match(/\{[\s\S]*\}/);
-  if (!m) throw new Error('ask JSON parse failed');
-  const j = JSON.parse(m[0]);
+  const j = looseJson(await llama(msgs, Math.max(+settings.maxTokens || 0, 300), 0.5));
+  if (!j) throw new Error('ask JSON parse failed');
   // 게임 요구사항: 버튼 2~4개 — 정리(공백/중복 제거) 후 부족하면 기본 선택지로 채움
   let opts = (Array.isArray(j.options) ? j.options : [])
     .map(o => String(o).trim().slice(0, 30)).filter(Boolean);

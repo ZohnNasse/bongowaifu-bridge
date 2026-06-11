@@ -133,6 +133,10 @@ Development log for BongoWaifu Bridge. Newest entries at the bottom.
 - Mood now carries tonal guidance, not just a label: added `moodGuide` (e.g. bored = "unenthused, drawn-out, slightly grumbling") injected as "happy (bright, upbeat tone…)".
 - Lines allowed 1–2 natural sentences (was "exactly one line"); per-line cap raised 120→200; `lineInstr` asks for mood/circumstance to show through.
 
+## 2026-06-11 — Robust JSON extraction
+
+- Memory/fact/schedule/etc. extraction was failing ("'w' is not valid JSON" — model dropped quotes around a value) because JSON was generated at the default 0.9 temperature. Added `looseJson()`: strips think, extracts the `{...}`, then attempts parse with escalating repairs (smart→straight quotes, trailing commas, wrapping unquoted values). All JSON-producing calls now run at low temperature (0.3–0.6) and use `looseJson`; memory summarization retries once. Greatly reduces malformed-JSON failures on small local models.
+
 ## 2026-06-10 — Schedule ignoring basic settings (age/role)
 
 - Schedules were generated from `settings.personality` only — name and especially **age** were never passed, so a 16-year-old student could get a "workplace" slot. Added `personaText()` which always composes name + age + how-she-calls-you + personality (+ persona.md if present) and is now used for schedule, relationship, and episode generation. Schedule system prompt also gained explicit rules: match age/role (student→school, never status-inconsistent places), respect weekday/weekend.
