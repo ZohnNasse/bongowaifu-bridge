@@ -87,6 +87,14 @@ function loadPersonaMd() {
   try { return fs.readFileSync(PERSONA_PATH(), 'utf8').trim(); } catch { return ''; }
 }
 
+// 스케줄/관계/일화 생성용 — 기본 설정(이름·나이·성격)을 항상 포함 + persona.md 합침
+function personaText() {
+  const S = settings;
+  const base = `이름: ${S.personaName}, 나이: ${S.personaAge}살, 호칭: 사용자를 '${S.userCall}'(이)라고 부름\n성격: ${S.personality}`;
+  const pmd = loadPersonaMd();
+  return pmd ? base + '\n' + pmd : base;
+}
+
 // ─────────── 하루 스케줄 ───────────
 let schedule = { date: '', slots: [] };
 let schedBusy = false;
@@ -101,7 +109,7 @@ async function ensureRelationships() {
   try {
     const raw = stripThink(await llama([
       { role: 'system', content: L().relSys },
-      { role: 'user', content: L().relUser(loadPersonaMd() || settings.personality) },
+      { role: 'user', content: L().relUser(personaText()) },
     ], 500, 0.9));
     const m = raw.match(/\{[\s\S]*\}/);
     if (!m) return;
@@ -124,7 +132,7 @@ async function ensureSchedule(force) {
   try {
     await ensureRelationships(); // 친구/가족 먼저 — 일과에 이름이 등장하도록
     const now = new Date();
-    const persona = (loadPersonaMd() || settings.personality) + '\n등장인물:\n' + parseMd(memMd).rel;
+    const persona = personaText() + '\n등장인물:\n' + parseMd(memMd).rel;
     const raw = stripThink(await llama([
       { role: 'system', content: L().schedSys },
       { role: 'user', content: L().schedUser(persona, L().dow[now.getDay()], todayStr()) },
@@ -159,7 +167,7 @@ async function maybeNarrateEpisode() {
     const p = parseMd(memMd);
     const raw = stripThink(await llama([
       { role: 'system', content: L().epiSys },
-      { role: 'user', content: L().epiUser(loadPersonaMd() || settings.personality, p.rel, s) },
+      { role: 'user', content: L().epiUser(personaText(), p.rel, s) },
     ], 300, 0.95));
     const epi = raw.split('\n').map(x => x.trim()).filter(Boolean)[0];
     if (epi) {
@@ -320,7 +328,7 @@ const STR = {
     relUser: (persona) => `캐릭터 설정:\n${persona || '평범한 인물'}\n\n이 인물의 가족과 친구들을 만들어줘.`,
     epiSys: '캐릭터가 방금 이 일과 시간 동안 실제로 겪은 일을 1인칭 시점으로 1~2문장 만들어라(작은 사건이나 감정 포함). 대사가 아니라 일기처럼. 본문만 출력.',
     epiUser: (persona, rel, s) => `캐릭터:\n${persona}\n\n등장인물:\n${rel || '(없음)'}\n\n방금 일과: ${s.start}~${s.end} ${s.place}에서 ${s.with || '혼자'}와(과) ${s.activity}. 여기서 있었던 일.`,
-    schedSys: '캐릭터의 오늘 하루 일과표를 현실적으로 만들어 JSON만 출력: {"slots":[{"start":"HH:MM","end":"HH:MM","place":"장소","activity":"하는 일","with":"같이 있는 사람(없으면 혼자)","transport":"직전 이동 수단(있으면)"}]}. 규칙: 기상~취침까지 빈 시간 없이 이어지게, 이동 구간도 별도 slot으로, 매일 달라야 함(다른 친구/장소/사건), 캐릭터 설정과 요일에 맞게. 6~10개 slot.',
+    schedSys: '캐릭터의 오늘 하루 일과표를 현실적으로 만들어 JSON만 출력: {"slots":[{"start":"HH:MM","end":"HH:MM","place":"장소","activity":"하는 일","with":"같이 있는 사람(없으면 혼자)","transport":"직전 이동 수단(있으면)"}]}. 규칙: ①캐릭터의 나이와 신분에 반드시 맞출 것 — 학생이면 학교/수업/방과후, 직장인이면 회사, 절대 신분에 안 맞는 장소(예: 16살 학생이 직장) 금지. ②평일/주말 구분(주말엔 학교·회사 없음). ③기상~취침까지 빈 시간 없이, 이동 구간도 별도 slot. ④매일 달라야 함(다른 친구/장소/사건). 6~10개 slot.',
     schedUser: (persona, dow, date) => `캐릭터 설정:\n${persona || '평범한 인물'}\n\n오늘: ${date} (${dow}). 이 인물의 오늘 일과표를 만들어줘.`,
     dow: ['일요일','월요일','화요일','수요일','목요일','금요일','토요일'],
     nowAt: (s) => s
@@ -383,7 +391,7 @@ const STR = {
     relUser: (persona) => `Character:\n${persona || 'an ordinary person'}\n\nCreate her family and friends.`,
     epiSys: 'Write, in first person, 1-2 sentences of what the character actually experienced during this scheduled time (include a small event or emotion). Like a diary entry, not dialogue. Output the text only.',
     epiUser: (persona, rel, s) => `Character:\n${persona}\n\nPeople:\n${rel || '(none)'}\n\nThe slot just now: ${s.start}-${s.end} at ${s.place}, ${s.activity} with ${s.with || 'alone'}. What happened.`,
-    schedSys: 'Create a realistic daily schedule for the character. Output JSON only: {"slots":[{"start":"HH:MM","end":"HH:MM","place":"location","activity":"what she does","with":"who she is with (or alone)","transport":"how she got there, if any"}]}. Rules: cover wake to sleep with no gaps, include travel as its own slots, must differ each day (different friends/places/events), fit the character and the weekday. 6-10 slots.',
+    schedSys: 'Create a realistic daily schedule for the character. Output JSON only: {"slots":[{"start":"HH:MM","end":"HH:MM","place":"location","activity":"what she does","with":"who she is with (or alone)","transport":"how she got there, if any"}]}. Rules: (1) MUST match the character\'s age and role — a student goes to school/classes/after-school, a worker to a job; never place them somewhere their status forbids (e.g. a 16-year-old student at a workplace). (2) Respect weekday vs weekend (no school/work on weekends). (3) Cover wake to sleep with no gaps, travel as its own slots. (4) Must differ each day (different friends/places/events). 6-10 slots.',
     schedUser: (persona, dow, date) => `Character:\n${persona || 'an ordinary person'}\n\nToday: ${date} (${dow}). Build her schedule for today.`,
     dow: ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'],
     nowAt: (s) => s
