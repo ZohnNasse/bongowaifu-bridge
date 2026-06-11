@@ -107,4 +107,10 @@ Development log for BongoWaifu Bridge. Newest entries at the bottom.
 ## 2026-06-10 — VOICEVOX TTS mode
 
 - Added a dedicated VOICEVOX mode (TTS mode dropdown: OS / VOICEVOX / Custom). Synthesis runs in the main process to avoid CORS: VOICEVOX is a 2-step call (`/audio_query` then `/synthesis`, speedScale from rate), returned as base64 audio the renderer plays; custom mode posts `{text,voice}`. Any failure falls back to the OS voice. Settings expose mode, server URL (default 127.0.0.1:50021), speaker ID, voice name, rate, and a "Test voice" button. VOICEVOX is CPU-based — chosen because the user's 8GB VRAM is already used by the LLM.
+
+## 2026-06-10 — Daily schedule / location continuity
+
+- The character had no sense of place — she'd flip between home and classroom randomly. Added a daily schedule system: once per day the LLM generates a realistic timeline (`schedule.json`) of 6–10 slots {start, end, place, activity, with, transport} based on persona + weekday, designed to differ each day (different friends/places/events, travel as its own slots, no gaps).
+- `currentSlot()` resolves the slot covering the current time; injected at the very top of the system prompt as [RIGHT NOW] ("she is at X doing Y with Z; not doing anything elsewhere") for location/activity consistency.
+- Auto-regenerates when the date changes (checked on start and in the tick loop). Settings → Daily schedule: enable toggle, view current schedule (▶ marks active slot), "Regenerate today" button. Cached per-day = one extra LLM call/day.
 - Summary prompt now also preserves facts the character invented about herself (job, hobbies, anecdotes), not just facts about the user — keeps her self-made lore consistent across sessions.

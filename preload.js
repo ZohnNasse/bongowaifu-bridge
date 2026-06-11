@@ -11,6 +11,7 @@ contextBridge.exposeInMainWorld('api', {
   askNow: () => ipcRenderer.invoke('ask:manual'),
   getMemory: () => ipcRenderer.invoke('memory:get'),
   clearMemory: () => ipcRenderer.invoke('memory:clear'),
+  regenSchedule: () => ipcRenderer.invoke('schedule:regen'),
   onLog: (cb) => ipcRenderer.on('log', (_, d) => cb(d)),
   onTts: (cb) => ipcRenderer.on('tts', (_, d) => cb(d)),
   ttsSynth: (t) => ipcRenderer.invoke('tts:synth', t),

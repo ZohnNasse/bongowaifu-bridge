@@ -87,6 +87,49 @@ function loadPersonaMd() {
   try { return fs.readFileSync(PERSONA_PATH(), 'utf8').trim(); } catch { return ''; }
 }
 
+// ─────────── 하루 스케줄 ───────────
+let schedule = { date: '', slots: [] };
+let schedBusy = false;
+function loadSched() { try { schedule = JSON.parse(fs.readFileSync(SCHED_PATH(), 'utf8')); } catch { schedule = { date: '', slots: [] }; } }
+function saveSched() { try { fs.writeFileSync(SCHED_PATH(), JSON.stringify(schedule, null, 2)); } catch {} }
+const todayStr = () => new Date().toLocaleDateString('en-CA'); // YYYY-MM-DD 로컬
+
+// 오늘 일과표 없으면 생성 (날짜 바뀌면 새로)
+async function ensureSchedule() {
+  if (!settings.schedEnable || schedBusy) return;
+  if (schedule.date === todayStr() && schedule.slots.length) return;
+  schedBusy = true;
+  try {
+    const now = new Date();
+    const raw = stripThink(await llama([
+      { role: 'system', content: L().schedSys },
+      { role: 'user', content: L().schedUser(loadPersonaMd() || settings.personality, L().dow[now.getDay()], todayStr()) },
+    ], 800, 0.9));
+    const m = raw.match(/\{[\s\S]*\}/);
+    if (!m) throw new Error('no JSON');
+    const slots = (JSON.parse(m[0]).slots || []).filter(s => s.start && s.end && s.place);
+    if (!slots.length) throw new Error('empty schedule');
+    schedule = { date: todayStr(), slots };
+    saveSched();
+    log('info', `today's schedule generated (${slots.length} slots)`);
+  } catch (e) {
+    log('info', `schedule generation failed: ${e.message}`);
+  } finally { schedBusy = false; }
+}
+
+// 현재 시각에 해당하는 일과 slot
+function currentSlot() {
+  if (!settings.schedEnable || schedule.date !== todayStr()) return null;
+  const n = new Date();
+  const cur = n.getHours() * 60 + n.getMinutes();
+  const toMin = t => { const [h, m] = String(t).split(':').map(Number); return h * 60 + (m || 0); };
+  return schedule.slots.find(s => {
+    let a = toMin(s.start), b = toMin(s.end);
+    if (b <= a) b += 1440; // 자정 넘김
+    return cur >= a && cur < b;
+  }) || null;
+}
+
 // 사용자 메시지에서 사실 추출 → memory.md User Facts에 즉시 누적 (백그라운드)
 async function extractUserFacts(text) {
   try {
@@ -144,8 +187,10 @@ function pickAskKeys(def) {
 // ─────────── 다국어 프롬프트 ───────────
 const STR = {
   ko: {
-    sys: (S, ch, timeStr, mins, summary, aff, tier, moodLabel) =>
+    sys: (S, ch, timeStr, mins, summary, aff, tier, moodLabel, nowAt) =>
 `너는 '${S.personaName}'(이)라는 인물이 되어 연기한다. 아래 [설정]은 너만 아는 내부 가이드라인이다.
+
+[지금 상황] ${nowAt}
 
 [설정 — 절대 입 밖에 내지 말 것]
 - 이름 ${S.personaName}, ${S.personaAge}살. 사용자를 '${S.userCall}'(이)라고 부름.
@@ -189,12 +234,20 @@ const STR = {
     memCtx: e => `(상황 메모: ${e})`,
     factSys: '사용자의 메시지에서 사용자에 대한 새로운 사실(좋아함/싫어함/성격/직업/일상/약속)을 추출해 JSON만 출력: {"facts":["사실"]}. 추측 금지 — 명확히 드러난 것만, 각 사실은 한 문장. 새 사실이 없으면 {"facts":[]}.',
     factUser: (known, msg) => `이미 아는 사실(중복 금지):\n${known || '(없음)'}\n\n사용자 메시지: "${msg}"`,
+    schedSys: '캐릭터의 오늘 하루 일과표를 현실적으로 만들어 JSON만 출력: {"slots":[{"start":"HH:MM","end":"HH:MM","place":"장소","activity":"하는 일","with":"같이 있는 사람(없으면 혼자)","transport":"직전 이동 수단(있으면)"}]}. 규칙: 기상~취침까지 빈 시간 없이 이어지게, 이동 구간도 별도 slot으로, 매일 달라야 함(다른 친구/장소/사건), 캐릭터 설정과 요일에 맞게. 6~10개 slot.',
+    schedUser: (persona, dow, date) => `캐릭터 설정:\n${persona || '평범한 인물'}\n\n오늘: ${date} (${dow}). 이 인물의 오늘 일과표를 만들어줘.`,
+    dow: ['일요일','월요일','화요일','수요일','목요일','금요일','토요일'],
+    nowAt: (s) => s
+      ? `지금 ${s.place}에 있다. ${s.with && s.with !== '혼자' ? s.with + '와(과) 함께 ' : ''}${s.activity} 중.${s.transport ? ' (방금 ' + s.transport + ')' : ''} — 이 상황을 전제로, 여기 없는 일은 하지 않는다.`
+      : '지금은 일과 사이 자유 시간이다.',
     affTier: a => a < 20 ? '서먹한 사이' : a < 40 ? '아는 사이' : a < 60 ? '친한 사이' : a < 80 ? '애틋한 사이' : '연인 같은 사이',
     moods: { neutral: '평온함', happy: '신남', excited: '들뜸', bored: '심심함' },
   },
   en: {
-    sys: (S, ch, timeStr, mins, summary, aff, tier, moodLabel) =>
+    sys: (S, ch, timeStr, mins, summary, aff, tier, moodLabel, nowAt) =>
 `You are roleplaying as '${S.personaName}'. The [PROFILE] below is your private internal guideline.
+
+[RIGHT NOW] ${nowAt}
 
 [PROFILE — never say any of this out loud]
 - Name ${S.personaName}, ${S.personaAge} y/o. You call the user '${S.userCall}'.
@@ -238,6 +291,12 @@ const STR = {
     memCtx: e => `(context note: ${e})`,
     factSys: 'Extract new facts about the user (likes/dislikes/personality/job/life/promises) from their message. Output JSON only: {"facts":["fact"]}. No guessing — only what is clearly stated, one sentence each. If nothing new: {"facts":[]}.',
     factUser: (known, msg) => `Already known facts (no duplicates):\n${known || '(none)'}\n\nUser message: "${msg}"`,
+    schedSys: 'Create a realistic daily schedule for the character. Output JSON only: {"slots":[{"start":"HH:MM","end":"HH:MM","place":"location","activity":"what she does","with":"who she is with (or alone)","transport":"how she got there, if any"}]}. Rules: cover wake to sleep with no gaps, include travel as its own slots, must differ each day (different friends/places/events), fit the character and the weekday. 6-10 slots.',
+    schedUser: (persona, dow, date) => `Character:\n${persona || 'an ordinary person'}\n\nToday: ${date} (${dow}). Build her schedule for today.`,
+    dow: ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'],
+    nowAt: (s) => s
+      ? `Right now she is at ${s.place}. ${s.with && s.with !== 'alone' ? 'With ' + s.with + ', ' : ''}${s.activity}.${s.transport ? ' (just ' + s.transport + ')' : ''} — speak as if this is where she is; she is not doing anything elsewhere.`
+      : 'Right now it is free time between scheduled activities.',
     affTier: a => a < 20 ? 'awkward strangers' : a < 40 ? 'acquaintances' : a < 60 ? 'close friends' : a < 80 ? 'affectionate' : 'like lovers',
     moods: { neutral: 'calm', happy: 'happy', excited: 'thrilled', bored: 'bored' },
   },
@@ -454,7 +513,7 @@ function sysPrompt(state) {
   const locale = settings.language === 'en' ? 'en-US' : 'ko-KR';
   const aff = Math.round(+memory.affection || 30);
   let sys = L().sys(settings, chJson, now.toLocaleString(locale), mins, memForPrompt(),
-                    aff, L().affTier(aff), L().moods[mood] || L().moods.neutral);
+                    aff, L().affTier(aff), L().moods[mood] || L().moods.neutral, L().nowAt(currentSlot()));
   // persona.md가 있으면 [규칙] 앞에 인물 상세로 삽입 (기본 설정보다 우선)
   const pmd = loadPersonaMd();
   if (pmd) {
@@ -593,6 +652,7 @@ async function tick() {
   if (!running || busy) return;
   busy = true;
   try {
+    if (schedule.date !== todayStr()) ensureSchedule(); // 날짜 바뀌면 새 일과표(비동기)
     const state = await mcp.state(['character', 'gauges', 'achievements']);
 
     // 게이지 티어 상승 / 만땅
@@ -662,6 +722,7 @@ async function start() {
   lastSpoke = Date.now();
   lastHotLevel = 0;
   hotFull = false;
+  await ensureSchedule(); // 오늘 일과표 준비 (인사 전에)
 
   // 기존 업적 베이스라인
   try {
@@ -784,7 +845,13 @@ ipcMain.handle('tts:synth', async (_, text) => {
 ipcMain.handle('memory:get', () => ({
   ...memory, md: memMd, mdPath: MEMMD_PATH(),
   personaPath: PERSONA_PATH(), hasPersona: !!loadPersonaMd(),
+  schedule, schedNow: currentSlot(),
 }));
+ipcMain.handle('schedule:regen', async () => {
+  schedule = { date: '', slots: [] }; // 강제 재생성
+  await ensureSchedule();
+  return { ok: schedule.slots.length > 0 };
+});
 ipcMain.handle('memory:clear', () => {
   memory = { recent: [], summary: '', affection: 30, lastTs: Date.now() };
   memMd = '';
@@ -797,6 +864,7 @@ app.whenReady().then(() => {
   settings = loadJson(SETTINGS_PATH(), DEFAULTS);
   memory = loadJson(MEMORY_PATH(), { recent: [], summary: '', affection: 30, lastTs: 0 });
   loadMd();
+  loadSched();
   // 구버전 summary → memory.md 일기로 이전
   if (!memMd.trim() && memory.summary) {
     memMd = buildMd({ facts: '', lore: '', diary: `### (migrated)\n- ${memory.summary}` });

@@ -112,6 +112,16 @@
       </div>
     </fieldset>
 
+    <fieldset><legend data-i18n="legSched"></legend>
+      <div class="row"><label><input type="checkbox" id="schedEnable"> <span data-i18n="chkSched"></span></label></div>
+      <div class="hint" data-i18n="hintSched"></div>
+      <div id="schedView" style="background:var(--bg);border:1px solid var(--line);border-radius:5px;padding:8px;font-size:12px;color:var(--dim);white-space:pre-wrap;margin-top:6px">—</div>
+      <div class="row" style="margin-top:8px">
+        <button id="btnSchedRefresh" data-i18n="btnSchedRefresh"></button>
+        <button id="btnSchedRegen" data-i18n="btnSchedRegen"></button>
+      </div>
+    </fieldset>
+
     <fieldset><legend data-i18n="legTts"></legend>
       <div class="row"><label><input type="checkbox" id="ttsEnable"> <span data-i18n="chkTts"></span></label></div>
       <div class="row"><label data-i18n="lblTtsMode"></label>
@@ -153,7 +163,7 @@
 const $ = id => document.getElementById(id);
 const FIELDS_TXT = ['language','personaName','personaAge','userCall','personality','speechStyle','llamaUrl','llamaModel','ttsMode','ttsUrl','ttsVoice'];
 const FIELDS_NUM = ['bongoPort','temperature','maxTokens','pollSec','idleSec','askChance','memRecent','ttsRate','ttsSpeaker'];
-const FIELDS_CHK = ['trigGreet','trigHot','trigAchv','trigIdle','trigAsk','memSummary','ttsEnable'];
+const FIELDS_CHK = ['trigGreet','trigHot','trigAchv','trigIdle','trigAsk','memSummary','ttsEnable','schedEnable'];
 let running = false;
 
 // ─────────── UI 다국어 ───────────
@@ -174,6 +184,9 @@ const I18N = {
     lblTtsSpeaker:'VOICEVOX 화자 번호', hintTtsSpeaker:'VOICEVOX 앱의 화자 목록 순서대로 번호 (예: ずんだもん 노멀=3). 모르면 3으로 시작.',
     hintTts:'OS=Windows 내장 음성(자원 0). VOICEVOX=실행 중인 VOICEVOX 엔진(기본 http://127.0.0.1:50021) 사용, CPU 동작이라 GPU 안 씀. 커스텀=POST {text,voice}에 오디오 응답하는 서버. 실패 시 OS 음성 폴백.',
     btnTtsTest:'음성 테스트',
+    legSched:'하루 스케줄', chkSched:'스케줄 사용 (캐릭터가 하루 일과를 가짐)',
+    hintSched:'매일 다른 일과표(등교/이동/친구 만남 등)를 생성해, 현재 시각에 맞는 "지금 어디서 뭐 하는 중"을 대사에 반영. 날짜가 바뀌면 자동으로 새 일과.',
+    btnSchedRefresh:'스케줄 보기', btnSchedRegen:'오늘 새로 생성',
     legMem:'메모리', lblMemRecent:'최근 기억 수(줄)', chkMemSummary:'장기 요약 사용',
     hintMem:'최근 기억이 1.5배를 넘으면 오래된 기록을 로컬 모델이 요약해 보관 (32k 컨텍스트 기준 100줄도 여유)',
     lblMemView:'현재 장기 기억', btnMemRefresh:'기억 보기 새로고침', btnMemClear:'기억 전체 삭제',
@@ -200,6 +213,9 @@ const I18N = {
     lblTtsSpeaker:'VOICEVOX speaker ID', hintTtsSpeaker:'Speaker number from the VOICEVOX app list (e.g. Zundamon normal=3). Start with 3 if unsure.',
     hintTts:'OS=Windows built-in voice (no resources). VOICEVOX=use the running VOICEVOX engine (default http://127.0.0.1:50021), CPU-based so no GPU. Custom=server that returns audio for POST {text,voice}. Falls back to OS voice on failure.',
     btnTtsTest:'Test voice',
+    legSched:'Daily schedule', chkSched:'Enable schedule (she has a daily routine)',
+    hintSched:'Generates a different daily routine each day (school/commute/meeting friends etc.) and reflects "where she is and what she is doing now" in her lines. New schedule auto-generated when the date changes.',
+    btnSchedRefresh:'View schedule', btnSchedRegen:'Regenerate today',
     legMem:'Memory', lblMemRecent:'Recent memory (lines)', chkMemSummary:'Long-term summary',
     hintMem:'When recent memory exceeds 1.5x, older lines are summarized by the local model (with 32k context even 100 lines is fine)',
     lblMemView:'Current long-term memory', btnMemRefresh:'Refresh memory view', btnMemClear:'Clear all memory',
@@ -402,6 +418,26 @@ async function playTts(text) {
 function syncTtsCfg(s) {
   ttsCfg = { enable: !!s.ttsEnable, mode: s.ttsMode || 'os', voice: s.ttsVoice || '', rate: +s.ttsRate || 1 };
 }
+
+// 스케줄 보기 / 재생성
+function fmtSched(m) {
+  if (!m.schedule || !m.schedule.slots || !m.schedule.slots.length) return '—';
+  const now = m.schedNow;
+  const lines = m.schedule.slots.map(s => {
+    const cur = now && s.start === now.start && s.place === now.place ? '▶ ' : '   ';
+    const w = s.with && s.with !== '혼자' && s.with !== 'alone' ? ' @' + s.with : '';
+    return `${cur}${s.start}-${s.end}  ${s.place}  ${s.activity}${w}`;
+  });
+  return `[${m.schedule.date}]\n` + lines.join('\n');
+}
+$('btnSchedRefresh').onclick = async () => {
+  $('schedView').textContent = fmtSched(await window.api.getMemory());
+};
+$('btnSchedRegen').onclick = async () => {
+  $('schedView').textContent = '...';
+  await window.api.regenSchedule();
+  $('schedView').textContent = fmtSched(await window.api.getMemory());
+};
 
 // 음성 테스트 버튼 (현재 입력값을 임시 저장 후 한 줄 재생)
 $('btnTtsTest').onclick = async () => {
