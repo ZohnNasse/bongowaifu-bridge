@@ -434,9 +434,13 @@ $('btnSchedRefresh').onclick = async () => {
   $('schedView').textContent = fmtSched(await window.api.getMemory());
 };
 $('btnSchedRegen').onclick = async () => {
-  $('schedView').textContent = '...';
-  await window.api.regenSchedule();
-  $('schedView').textContent = fmtSched(await window.api.getMemory());
+  $('btnSchedRegen').disabled = true;
+  $('schedView').textContent = lang === 'en' ? 'generating... (one LLM call, may take a moment)' : '생성 중... (LLM 호출 1회, 잠시 걸릴 수 있음)';
+  const r = await window.api.regenSchedule();
+  $('btnSchedRegen').disabled = false;
+  const m = await window.api.getMemory();
+  $('schedView').textContent = r.ok ? fmtSched(m)
+    : (lang === 'en' ? 'Failed — check chat log for the error.' : '실패 — 채팅창 로그에서 오류 확인.');
 };
 
 // 음성 테스트 버튼 (현재 입력값을 임시 저장 후 한 줄 재생)

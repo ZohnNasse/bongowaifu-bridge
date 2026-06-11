@@ -117,4 +117,12 @@ Development log for BongoWaifu Bridge. Newest entries at the bottom.
 ## 2026-06-10 — VOICEVOX Korean→Japanese voicing
 
 - VOICEVOX only speaks Japanese, so Korean bubbles produced no/garbled audio (the test worked only because it sent a Japanese sample). Now in VOICEVOX mode each line is translated to Japanese (`toJapanese()` in main, low-temp LLM call) before synthesis — the bubble text stays Korean, only the voice is Japanese. Lines already lacking Hangul/Latin are passed through unchanged.
+
+## 2026-06-10 — Living character: relationships, life episodes, feelings
+
+- memory.md expanded from 3 to 6 sections: **User Facts**, **Relationships** (family/friends), **Character Lore**, **Episodes** (what she lived through), **Feelings** (emotional impressions of conversations), **Diary**.
+- **Relationships**: seeded once via LLM from persona (4–7 people, name/relation/note), persisted; passed into schedule generation so daily routines reference consistent names.
+- **Life episodes**: when a schedule slot's end time passes, `maybeNarrateEpisode()` generates a 1–2 sentence first-person account of what happened there (using persona + relationships), stored under Episodes with date/time. Recent episodes are injected into the prompt and surfaced via two new idle topics ("tell something that happened today", "a snippet about family/friend") so she proactively shares her day. Tracked per-day via `schedule.narrated`.
+- **Conversation feelings**: the per-message extraction (`extractUserFacts`) now returns `{facts, feeling}` in one call — the felt emotion (good/hurt/fluttered) is appended to Feelings by date, alongside user facts. No extra LLM call.
+- Schedule robustness: regeneration now bypasses the enable-toggle and cache (`ensureSchedule(true)`), shows "generating…"/failure feedback in the UI and a "일과표 생성 중…" chat log; token budget raised to 900. (Schedule view/regen failing before was the LLM call being slow or returning non-JSON.)
 - Summary prompt now also preserves facts the character invented about herself (job, hobbies, anecdotes), not just facts about the user — keeps her self-made lore consistent across sessions.

@@ -94,27 +94,82 @@ function loadSched() { try { schedule = JSON.parse(fs.readFileSync(SCHED_PATH(),
 function saveSched() { try { fs.writeFileSync(SCHED_PATH(), JSON.stringify(schedule, null, 2)); } catch {} }
 const todayStr = () => new Date().toLocaleDateString('en-CA'); // YYYY-MM-DD 로컬
 
-// 오늘 일과표 없으면 생성 (날짜 바뀌면 새로)
-async function ensureSchedule() {
-  if (!settings.schedEnable || schedBusy) return;
-  if (schedule.date === todayStr() && schedule.slots.length) return;
-  schedBusy = true;
+// 가족·친구가 없으면 1회 생성 (영속)
+async function ensureRelationships() {
+  const p = parseMd(memMd);
+  if (p.rel.trim()) return;
   try {
+    const raw = stripThink(await llama([
+      { role: 'system', content: L().relSys },
+      { role: 'user', content: L().relUser(loadPersonaMd() || settings.personality) },
+    ], 500, 0.9));
+    const m = raw.match(/\{[\s\S]*\}/);
+    if (!m) return;
+    const list = (JSON.parse(m[0]).people || [])
+      .filter(x => x && x.name).map(x => `- ${x.name} (${x.relation || ''}): ${x.note || ''}`);
+    if (!list.length) return;
+    p.rel = list.join('\n');
+    memMd = buildMd(p); saveMd();
+    log('info', `relationships seeded (${list.length})`);
+  } catch (e) { log('info', `relationships failed: ${e.message}`); }
+}
+
+// 오늘 일과표 없으면 생성 (날짜 바뀌면 새로)
+async function ensureSchedule(force) {
+  if (schedBusy) return;
+  if (!force && !settings.schedEnable) return;
+  if (!force && schedule.date === todayStr() && schedule.slots.length) return;
+  schedBusy = true;
+  log('info', '오늘 일과표 생성 중...');
+  try {
+    await ensureRelationships(); // 친구/가족 먼저 — 일과에 이름이 등장하도록
     const now = new Date();
+    const persona = (loadPersonaMd() || settings.personality) + '\n등장인물:\n' + parseMd(memMd).rel;
     const raw = stripThink(await llama([
       { role: 'system', content: L().schedSys },
-      { role: 'user', content: L().schedUser(loadPersonaMd() || settings.personality, L().dow[now.getDay()], todayStr()) },
-    ], 800, 0.9));
+      { role: 'user', content: L().schedUser(persona, L().dow[now.getDay()], todayStr()) },
+    ], 900, 0.9));
     const m = raw.match(/\{[\s\S]*\}/);
-    if (!m) throw new Error('no JSON');
+    if (!m) throw new Error('JSON 없음 (모델 응답 형식 문제)');
     const slots = (JSON.parse(m[0]).slots || []).filter(s => s.start && s.end && s.place);
-    if (!slots.length) throw new Error('empty schedule');
-    schedule = { date: todayStr(), slots };
+    if (!slots.length) throw new Error('빈 일과표');
+    schedule = { date: todayStr(), slots, narrated: [] };
     saveSched();
-    log('info', `today's schedule generated (${slots.length} slots)`);
+    log('info', `오늘 일과표 생성됨 (${slots.length}개)`);
   } catch (e) {
-    log('info', `schedule generation failed: ${e.message}`);
+    log('error', `일과표 생성 실패: ${e.message} — 다시 시도하려면 '오늘 새로 생성'`);
   } finally { schedBusy = false; }
+}
+
+// 끝난 일과 시간대에 실제 있었던 일(episode)을 생성해 기억에 저장
+async function maybeNarrateEpisode() {
+  if (schedBusy || !settings.schedEnable || schedule.date !== todayStr()) return;
+  const n = new Date(); const cur = n.getHours() * 60 + n.getMinutes();
+  const toMin = t => { const [h, m] = String(t).split(':').map(Number); return h * 60 + (m || 0); };
+  schedule.narrated = schedule.narrated || [];
+  let idx = -1;
+  schedule.slots.forEach((s, i) => {
+    let b = toMin(s.end); if (b <= toMin(s.start)) b += 1440;
+    if (b <= cur && !schedule.narrated.includes(i)) idx = i; // 가장 최근에 끝난 미서술 슬롯
+  });
+  if (idx < 0) return;
+  schedBusy = true;
+  try {
+    const s = schedule.slots[idx];
+    const p = parseMd(memMd);
+    const raw = stripThink(await llama([
+      { role: 'system', content: L().epiSys },
+      { role: 'user', content: L().epiUser(loadPersonaMd() || settings.personality, p.rel, s) },
+    ], 300, 0.95));
+    const epi = raw.split('\n').map(x => x.trim()).filter(Boolean)[0];
+    if (epi) {
+      p.episodes = (p.episodes ? p.episodes + '\n\n' : '') + `### ${todayStr()} ${s.start}-${s.end} ${s.place}\n- ${epi}`;
+      memMd = buildMd(p); saveMd();
+      log('info', `오늘 있었던 일 기록: ${s.place}`);
+    }
+    schedule.narrated.push(idx); saveSched();
+  } catch (e) { log('info', `episode failed: ${e.message}`); }
+  finally { schedBusy = false; }
 }
 
 // 현재 시각에 해당하는 일과 slot
@@ -139,13 +194,21 @@ async function extractUserFacts(text) {
     ], 300));
     const m = raw.match(/\{[\s\S]*\}/);
     if (!m) return;
-    const list = (JSON.parse(m[0]).facts || []).map(f => String(f).trim()).filter(Boolean);
-    if (!list.length) return;
+    const j = JSON.parse(m[0]);
+    const list = (j.facts || []).map(f => String(f).trim()).filter(Boolean);
+    const feeling = String(j.feeling || '').trim();
     const p = parseMd(memMd);
-    let added = 0;
+    let changed = 0;
     for (const f of list)
-      if (!p.facts.includes(f)) { p.facts += (p.facts ? '\n' : '') + `- ${f}`; added++; }
-    if (added) { memMd = buildMd(p); saveMd(); log('info', `user facts +${added}`); }
+      if (!p.facts.includes(f)) { p.facts += (p.facts ? '\n' : '') + `- ${f}`; changed++; }
+    if (feeling) { // 대화에서 느낀 감정을 날짜별로 적립
+      const stamp = `### ${todayStr()}`;
+      p.feelings = p.feelings.includes(stamp)
+        ? p.feelings + `\n- ${feeling}`
+        : (p.feelings ? p.feelings + '\n\n' : '') + `${stamp}\n- ${feeling}`;
+      changed++;
+    }
+    if (changed) { memMd = buildMd(p); saveMd(); log('info', `기억 갱신 (사실 ${list.length}, 감정 ${feeling ? '○' : '×'})`); }
   } catch {} // 실패해도 대화엔 영향 없음
 }
 
@@ -154,24 +217,41 @@ function parseMd(s) {
     const m = s.match(new RegExp(`## ${h}\\n([\\s\\S]*?)(?=\\n## |$)`));
     return m ? m[1].trim() : '';
   };
-  return { facts: get('User Facts'), lore: get('Character Lore'), diary: get('Diary') };
+  return {
+    facts: get('User Facts'),         // 사용자에 대한 기억
+    rel: get('Relationships'),        // 가족·친구
+    lore: get('Character Lore'),      // 캐릭터 자기 설정
+    episodes: get('Episodes'),        // 하루 동안 겪은 일
+    feelings: get('Feelings'),        // 대화에서 느낀 감정
+    diary: get('Diary'),              // 날짜별 요약
+  };
 }
 function buildMd(p) {
-  return `# Long-term Memory\n\n## User Facts\n${p.facts}\n\n## Character Lore\n${p.lore}\n\n## Diary\n${p.diary}\n`;
+  return `# Long-term Memory\n\n## User Facts\n${p.facts || ''}\n\n## Relationships\n${p.rel || ''}\n\n` +
+         `## Character Lore\n${p.lore || ''}\n\n## Episodes\n${p.episodes || ''}\n\n` +
+         `## Feelings\n${p.feelings || ''}\n\n## Diary\n${p.diary || ''}\n`;
+}
+// 섹션에서 최근 N개 엔트리만 (### 구분)
+function recentEntries(s, n) {
+  if (!s) return '';
+  return s.split(/\n(?=### )/).slice(-n).join('\n');
 }
 
-// 프롬프트용 발췌: 사실/설정 우선, 일기는 최신부터 (총량 캡 — 64k 컨텍스트면 여유)
+// 프롬프트용 발췌 (총량 캡 — 64k 컨텍스트면 여유). 사실/관계/설정은 항상, 일화·감정·일기는 최신 위주.
 function memForPrompt() {
   if (!memMd.trim()) return '';
   const p = parseMd(memMd);
-  const CAP = 6000;
-  let entries = p.diary ? p.diary.split(/\n(?=### )/) : [];
-  let txt;
-  do {
-    txt = `[사용자 사실]\n${p.facts}\n[캐릭터 자기 설정]\n${p.lore}\n[일기]\n${entries.join('\n')}`;
-    if (txt.length > CAP && entries.length > 1) entries.shift(); // 오래된 일기부터 제외
-    else break;
-  } while (true);
+  const CAP = 6500;
+  let epN = 8, feN = 6, diN = 5;
+  const build = () =>
+    `[사용자에 대한 기억]\n${p.facts}\n[가족·친구]\n${p.rel}\n[나의 설정]\n${p.lore}\n` +
+    `[최근 있었던 일]\n${recentEntries(p.episodes, epN)}\n[대화에서 느낀 감정]\n${recentEntries(p.feelings, feN)}\n` +
+    `[일기]\n${recentEntries(p.diary, diN)}`;
+  let txt = build();
+  while (txt.length > CAP && (diN > 1 || epN > 3 || feN > 2)) {
+    if (diN > 1) diN--; else if (feN > 2) feN--; else epN--;
+    txt = build();
+  }
   return txt;
 }
 let askKeys = { textKey: 'text', optKey: 'options' }; // 연결 시 실제 스키마로 갱신
@@ -225,6 +305,8 @@ const STR = {
       '오늘 하루에 대한 짧은 감상',
       '사용자를 살짝 놀리는 장난',
       '계절이나 날씨 이야기',
+      '오늘 있었던 일(최근 있었던 일) 중 하나를 신나게 들려주기',
+      '가족이나 친구 이야기 한 토막',
     ],
     evIdle: t => `한동안 조용했다. 잡담 주제: "${t}". 직전 대사들과 비슷한 말 반복 절대 금지 — 완전히 새로운 문장으로.`,
     evAskIdle: '한동안 조용했다. 사용자 근황이나 기분, 휴식 여부 등을 가볍게 묻는다.',
@@ -232,8 +314,12 @@ const STR = {
     evReact: a => `사용자가 방금 질문에 '${a}'라고 답했다. 그에 맞게 반응한다.`,
     defOpts: ['응', '아니'],
     memCtx: e => `(상황 메모: ${e})`,
-    factSys: '사용자의 메시지에서 사용자에 대한 새로운 사실(좋아함/싫어함/성격/직업/일상/약속)을 추출해 JSON만 출력: {"facts":["사실"]}. 추측 금지 — 명확히 드러난 것만, 각 사실은 한 문장. 새 사실이 없으면 {"facts":[]}.',
+    factSys: '대화에서 (1)사용자에 대한 새로운 사실과 (2)캐릭터가 이번 대화에서 느낀 감정을 추출해 JSON만 출력: {"facts":["사용자에 대한 사실(좋아함/싫어함/성격/직업/일상/약속)"],"feeling":"캐릭터가 느낀 솔직한 감정 한 줄(좋았다/서운했다/설렜다 등) 또는 빈 문자열"}. 사실은 추측 금지·명확한 것만·각 한 문장. 특별한 감정 없으면 feeling은 빈 문자열.',
     factUser: (known, msg) => `이미 아는 사실(중복 금지):\n${known || '(없음)'}\n\n사용자 메시지: "${msg}"`,
+    relSys: '캐릭터의 가족과 친구를 만들어 JSON만 출력: {"people":[{"name":"이름","relation":"관계(엄마/단짝/선배 등)","note":"한 줄 특징"}]}. 4~7명, 캐릭터 설정과 어울리게.',
+    relUser: (persona) => `캐릭터 설정:\n${persona || '평범한 인물'}\n\n이 인물의 가족과 친구들을 만들어줘.`,
+    epiSys: '캐릭터가 방금 이 일과 시간 동안 실제로 겪은 일을 1인칭 시점으로 1~2문장 만들어라(작은 사건이나 감정 포함). 대사가 아니라 일기처럼. 본문만 출력.',
+    epiUser: (persona, rel, s) => `캐릭터:\n${persona}\n\n등장인물:\n${rel || '(없음)'}\n\n방금 일과: ${s.start}~${s.end} ${s.place}에서 ${s.with || '혼자'}와(과) ${s.activity}. 여기서 있었던 일.`,
     schedSys: '캐릭터의 오늘 하루 일과표를 현실적으로 만들어 JSON만 출력: {"slots":[{"start":"HH:MM","end":"HH:MM","place":"장소","activity":"하는 일","with":"같이 있는 사람(없으면 혼자)","transport":"직전 이동 수단(있으면)"}]}. 규칙: 기상~취침까지 빈 시간 없이 이어지게, 이동 구간도 별도 slot으로, 매일 달라야 함(다른 친구/장소/사건), 캐릭터 설정과 요일에 맞게. 6~10개 slot.',
     schedUser: (persona, dow, date) => `캐릭터 설정:\n${persona || '평범한 인물'}\n\n오늘: ${date} (${dow}). 이 인물의 오늘 일과표를 만들어줘.`,
     dow: ['일요일','월요일','화요일','수요일','목요일','금요일','토요일'],
@@ -282,6 +368,8 @@ const STR = {
       'a short reflection on today',
       'lightly teasing the user',
       'the season or the weather',
+      'excitedly telling one thing that happened today (from recent episodes)',
+      'a snippet about your family or a friend',
     ],
     evIdle: t => `It has been quiet for a while. Small-talk topic: "${t}". Never repeat anything similar to your previous lines — a completely fresh sentence.`,
     evAskIdle: 'It has been quiet for a while. Casually ask how the user is doing, their mood, or whether they need a break.',
@@ -289,8 +377,12 @@ const STR = {
     evReact: a => `The user just answered '${a}' to your question. React accordingly.`,
     defOpts: ['Yes', 'No'],
     memCtx: e => `(context note: ${e})`,
-    factSys: 'Extract new facts about the user (likes/dislikes/personality/job/life/promises) from their message. Output JSON only: {"facts":["fact"]}. No guessing — only what is clearly stated, one sentence each. If nothing new: {"facts":[]}.',
+    factSys: 'From the conversation, extract (1) new facts about the user and (2) the emotion the character felt this turn. Output JSON only: {"facts":["fact about the user (likes/dislikes/personality/job/life/promises)"],"feeling":"one honest line of how the character felt (happy/hurt/fluttered etc.) or empty string"}. Facts: no guessing, only clear ones, one sentence each. Empty feeling if nothing notable.',
     factUser: (known, msg) => `Already known facts (no duplicates):\n${known || '(none)'}\n\nUser message: "${msg}"`,
+    relSys: 'Create the character\'s family and friends. Output JSON only: {"people":[{"name":"name","relation":"relation (mom/best friend/senior etc.)","note":"one-line trait"}]}. 4-7 people, fitting the character.',
+    relUser: (persona) => `Character:\n${persona || 'an ordinary person'}\n\nCreate her family and friends.`,
+    epiSys: 'Write, in first person, 1-2 sentences of what the character actually experienced during this scheduled time (include a small event or emotion). Like a diary entry, not dialogue. Output the text only.',
+    epiUser: (persona, rel, s) => `Character:\n${persona}\n\nPeople:\n${rel || '(none)'}\n\nThe slot just now: ${s.start}-${s.end} at ${s.place}, ${s.activity} with ${s.with || 'alone'}. What happened.`,
     schedSys: 'Create a realistic daily schedule for the character. Output JSON only: {"slots":[{"start":"HH:MM","end":"HH:MM","place":"location","activity":"what she does","with":"who she is with (or alone)","transport":"how she got there, if any"}]}. Rules: cover wake to sleep with no gaps, include travel as its own slots, must differ each day (different friends/places/events), fit the character and the weekday. 6-10 slots.',
     schedUser: (persona, dow, date) => `Character:\n${persona || 'an ordinary person'}\n\nToday: ${date} (${dow}). Build her schedule for today.`,
     dow: ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'],
@@ -653,6 +745,7 @@ async function tick() {
   busy = true;
   try {
     if (schedule.date !== todayStr()) ensureSchedule(); // 날짜 바뀌면 새 일과표(비동기)
+    else maybeNarrateEpisode();                          // 끝난 일과의 경험을 기억에 적립
     const state = await mcp.state(['character', 'gauges', 'achievements']);
 
     // 게이지 티어 상승 / 만땅
@@ -861,8 +954,8 @@ ipcMain.handle('memory:get', () => ({
   schedule, schedNow: currentSlot(),
 }));
 ipcMain.handle('schedule:regen', async () => {
-  schedule = { date: '', slots: [] }; // 강제 재생성
-  await ensureSchedule();
+  schedule = { date: '', slots: [] }; // 강제 재생성 (토글 상태 무관)
+  await ensureSchedule(true);
   return { ok: schedule.slots.length > 0 };
 });
 ipcMain.handle('memory:clear', () => {
