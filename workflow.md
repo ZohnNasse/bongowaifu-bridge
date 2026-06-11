@@ -126,6 +126,13 @@ Development log for BongoWaifu Bridge. Newest entries at the bottom.
 - **Conversation feelings**: the per-message extraction (`extractUserFacts`) now returns `{facts, feeling}` in one call — the felt emotion (good/hurt/fluttered) is appended to Feelings by date, alongside user facts. No extra LLM call.
 - Schedule robustness: regeneration now bypasses the enable-toggle and cache (`ensureSchedule(true)`), shows "generating…"/failure feedback in the UI and a "일과표 생성 중…" chat log; token budget raised to 900. (Schedule view/regen failing before was the LLM call being slow or returning non-JSON.)
 
+## 2026-06-11 — Response coherence (flat/fragmentary voice)
+
+- `cleanLine()` was taking only the FIRST non-empty line, so any multi-line reply was truncated to a fragment. Now it joins all content lines (dropping pure stage-direction/name-tag lines) into one utterance.
+- System prompt rewritten (both languages) to foreground state instead of burying it: leads with identity (name/age/personality), then a prominent "■ YOUR STATE RIGHT NOW" block (situation · mood · relationship · time) that must show in speech, then memory, then acting rules. Replaced the flat fact-dump [PROFILE] layout.
+- Mood now carries tonal guidance, not just a label: added `moodGuide` (e.g. bored = "unenthused, drawn-out, slightly grumbling") injected as "happy (bright, upbeat tone…)".
+- Lines allowed 1–2 natural sentences (was "exactly one line"); per-line cap raised 120→200; `lineInstr` asks for mood/circumstance to show through.
+
 ## 2026-06-10 — Schedule ignoring basic settings (age/role)
 
 - Schedules were generated from `settings.personality` only — name and especially **age** were never passed, so a 16-year-old student could get a "workplace" slot. Added `personaText()` which always composes name + age + how-she-calls-you + personality (+ persona.md if present) and is now used for schedule, relationship, and episode generation. Schedule system prompt also gained explicit rules: match age/role (student→school, never status-inconsistent places), respect weekday/weekend.
