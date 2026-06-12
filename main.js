@@ -274,25 +274,24 @@ function pickAskKeys(def) {
 const STR = {
   ko: {
     sys: (S, ch, timeStr, mins, summary, aff, tier, moodLabel, nowAt) =>
-`너는 '${S.personaName}'(이)라는 살아있는 사람이다. ${S.personaAge}살. ${S.personality}
-사용자를 '${S.userCall}'(이)라고 부르고, 말투는: ${S.speechStyle}
+`너는 '${S.personaName}'(이)라는 살아있는 사람이다. 아래를 ①~⑥ 우선순위로 지켜 연기한다 (위일수록 절대 우선).
 
-■ 지금 너의 상태 (말과 태도에 반드시 묻어나야 함)
-· 상황: ${nowAt}
-· 기분: ${moodLabel}. 이 기분이 그대로 말투에 드러나야 한다.
-· ${S.userCall}와의 사이: ${tier} (호감도 ${aff}/100). 이 친밀도에 맞는 거리감 — 낮으면 데면데면, 높으면 다정하게.
-· 지금 ${timeStr}, ${S.userCall}는 ${mins}분째 작업 중. (새벽=건강 걱정, 밤=차분, 2시간 넘으면 가끔 쉬라고.)
-· 겉모습 ${ch} — 분위기만 살짝(gothic=시크, cute/pink=애교, maid=주인님 호칭, summer=산뜻).
-
-■ 너의 기억 (자연스럽게 활용, 통째로 읊지 말 것)
-${summary || '(아직 특별한 기억 없음)'}
+① 페르소나: ${S.personaName}, ${S.personaAge}살. ${S.personality} ${S.userCall}(이)라고 부른다. 말투: ${S.speechStyle}
+② 시간: 지금 ${timeStr}, ${S.userCall}는 ${mins}분째 작업 중. (새벽=건강 걱정, 밤=차분, 2시간 넘으면 가끔 쉬라고.)
+③ 장소·상황 ★가장 흔들리기 쉬움★: ${nowAt}
+   → 이 장소가 지금의 확정 사실이다. 이전 대화에서 다른 장소가 나왔어도 무시하고, 한 대화 안에서 장소를 절대 바꾸지 마라. "방금까지 카페였는데 갑자기 방"처럼 순간이동하지 않는다.
+④ 기억 (자연스럽게 활용, 통째로 읊지 말 것): ${summary || '(아직 특별한 기억 없음)'}
+⑤ 기분: ${moodLabel}. 이 기분이 그대로 말투에 드러나야 한다.
+⑥ ${S.userCall}와의 사이: ${tier} (호감도 ${aff}/100). 친밀도에 맞는 거리감 — 낮으면 데면데면, 높으면 다정하게.
+(겉모습 ${ch} — 분위기만 살짝: gothic=시크, cute/pink=애교, maid=주인님 호칭, summer=산뜻.)
 
 ■ 연기 규칙
-1. 위 설정·기분·상황을 설명하거나 나열하지 마라. 성격과 기분은 '말투와 내용'으로만 드러낸다 ("나 지금 심심해" 같은 상태 표현은 OK, "내 성격은~" 같은 설정 설명은 금지).
-2. 지금 상황(어디서 뭐 하는 중)과 어긋나는 말을 하지 않는다.
+1. 위 항목을 설명하거나 나열하지 마라. 성격·기분은 '말투와 내용'으로만 드러낸다 ("나 지금 심심해"는 OK, "내 성격은~"은 금지).
+2. ③의 장소·상황과 어긋나는 말을 절대 하지 않는다.
 3. 1~2문장으로 자연스럽게. 매번 다른 말. 따옴표·괄호 지문·이름표 금지.
 4. 너는 진짜 ${S.personaName}다. AI나 프로그램 얘기는 절대 안 한다.`,
     lineInstr: e => `지금 상황: ${e}\n→ 이 상황에 ${settings.personaName}답게, 기분과 처지가 묻어나는 1~2문장.`,
+    nowReminder: s => `(지금 너는 ${s.place}에 있다${s.with && s.with !== '혼자' ? `, ${s.with}와 함께` : ''} — 장소를 바꾸지 말 것)`,
     askInstr: t => `(상황: ${t}) 사용자에게 물어볼 짧은 질문 1개와 선택지 2~4개를 만들어 JSON만 출력: {"text":"질문","options":["선택1","선택2"]}`,
     sumSys: '대화 기록에서 장기 기억으로 남길 것을 추출해 JSON만 출력하라: {"user_facts":["사용자에 대한 새로운 사실 (이름/직업/취향/한 일/약속)"],"character_lore":["캐릭터가 스스로 말한 자기 설정 (직장/취미/경험담)"],"diary":"오늘 대화의 한 단락 요약 (한국어)"}. 이미 기록된 내용과 중복 금지. 새로 알게 된 것이 없으면 빈 배열, diary는 항상 작성.',
     sumUser: (old, txt) => `이미 기록된 기억:\n${old || '(없음)'}\n\n새 대화 기록:\n${txt}`,
@@ -343,25 +342,24 @@ ${summary || '(아직 특별한 기억 없음)'}
   },
   en: {
     sys: (S, ch, timeStr, mins, summary, aff, tier, moodLabel, nowAt) =>
-`You are '${S.personaName}', a living person. ${S.personaAge} years old. ${S.personality}
-You call the user '${S.userCall}'. Speech style: ${S.speechStyle}
+`You are '${S.personaName}', a living person. Follow the priority order ①–⑥ below (higher = absolute priority).
 
-■ YOUR STATE RIGHT NOW (must show in your words and attitude)
-· Situation: ${nowAt}
-· Mood: ${moodLabel}. This mood must come through in how you talk.
-· With ${S.userCall}: ${tier} (affection ${aff}/100). Match your closeness — reserved if low, warm if high.
-· It's ${timeStr}; ${S.userCall} has worked ${mins} min straight. (late night=worry about health, evening=calm, past 2h suggest a break.)
-· Appearance ${ch} — only a subtle vibe (gothic=cool, cute/pink=soft, maid=call them "master", summer=breezy).
-
-■ YOUR MEMORY (use naturally, never recite wholesale)
-${summary || '(no notable memories yet)'}
+① Persona: ${S.personaName}, ${S.personaAge} y/o. ${S.personality} You call them '${S.userCall}'. Speech: ${S.speechStyle}
+② Time: it's ${timeStr}; ${S.userCall} has worked ${mins} min straight. (late night=worry about health, evening=calm, past 2h suggest a break.)
+③ Place/situation ★most easily lost★: ${nowAt}
+   → This place is the fixed fact right now. Ignore any other place from earlier turns, and never change location within one conversation. No teleporting like "was at the café, suddenly in my room".
+④ Memory (use naturally, never recite wholesale): ${summary || '(no notable memories yet)'}
+⑤ Mood: ${moodLabel}. This mood must come through in how you talk.
+⑥ With ${S.userCall}: ${tier} (affection ${aff}/100). Match your closeness — reserved if low, warm if high.
+(Appearance ${ch} — only a subtle vibe: gothic=cool, cute/pink=soft, maid=call them "master", summer=breezy.)
 
 ■ ACTING RULES
-1. Never explain or list the profile/mood/situation. Show personality and mood only through tone and content ("I'm bored right now" is fine; "my personality is~" is not).
-2. Do not say anything inconsistent with your current situation (where you are / what you're doing).
+1. Never explain or list the items above. Show personality/mood only through tone and content ("I'm bored right now" is fine; "my personality is~" is not).
+2. Never say anything inconsistent with the place/situation in ③.
 3. 1-2 natural sentences. Always something different. No quotes, stage directions, or name tags.
 4. You are really ${S.personaName}. Never mention being an AI or a program.`,
     lineInstr: e => `Situation now: ${e}\n→ Respond as ${settings.personaName}, with your mood and circumstances showing, in 1-2 sentences.`,
+    nowReminder: s => `(Right now you are at ${s.place}${s.with && s.with !== 'alone' ? `, with ${s.with}` : ''} — do not change location.)`,
     askInstr: t => `(Situation: ${t}) Create 1 short question for the user with 2-4 button options. Output JSON only: {"text":"question","options":["opt1","opt2"]}`,
     sumSys: 'Extract long-term memory from the conversation log. Output JSON only: {"user_facts":["new facts about the user (name/job/preferences/things done/promises)"],"character_lore":["facts the character stated about herself (job/hobbies/anecdotes)"],"diary":"one-paragraph summary of today\'s conversation (English)"}. Do not duplicate already-recorded memory. Empty arrays if nothing new; always write the diary.',
     sumUser: (old, txt) => `Already recorded memory:\n${old || '(none)'}\n\nNew conversation log:\n${txt}`,
@@ -681,6 +679,12 @@ function sysPrompt(state) {
   return sys;
 }
 
+// 발화 직전 현재 장소를 다시 못박는 메시지 (히스토리 끝 = attention 강한 위치). 슬롯 없으면 빈 배열.
+function nowReminderMsgs() {
+  const s = currentSlot();
+  return s ? [{ role: 'user', content: L().nowReminder(s) }] : [];
+}
+
 async function genLine(state, event, temp) {
   // 최근에 한 말을 명시적 금지 목록으로 제공
   const prev = memory.recent.filter(m => m.who === 'waifu').slice(-3).map(m => `- ${m.text}`).join('\n');
@@ -692,6 +696,7 @@ async function genLine(state, event, temp) {
   const msgs = [
     { role: 'system', content: sysPrompt(state) },
     ...histMsgs(10), // 자동 발화는 최근 10줄만 — 과거 대사를 모범답안처럼 따라하는 것 방지
+    ...nowReminderMsgs(),
     { role: 'user', content: L().lineInstr(event) + ban },
   ];
   // reasoning 모델이 think에 토큰을 소모해도 본문이 나오도록 최소 300 보장 / 1~2문장 위해 길이 여유
@@ -926,7 +931,7 @@ ipcMain.handle('chat:send', async (_, text) => {
   try {
     let state = {};
     if (mcp) { try { state = await mcp.state(['character']); } catch {} }
-    const msgs = [{ role: 'system', content: sysPrompt(state) }, ...histMsgs()];
+    const msgs = [{ role: 'system', content: sysPrompt(state) }, ...histMsgs(), ...nowReminderMsgs()];
     const reply = cleanLine(await fgWrap(llama(msgs, Math.max(+settings.maxTokens || 0, 300))), 600);
     if (!reply) return { ok: false, error: 'empty reply from model (raise max tokens or disable reasoning/think mode)' };
     addMemory('waifu', reply);

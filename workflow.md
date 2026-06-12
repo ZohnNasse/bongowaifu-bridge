@@ -149,6 +149,14 @@ Development log for BongoWaifu Bridge. Newest entries at the bottom.
 - All LLM calls now go through a serializing queue (`llama()` chains onto `llmChain`) so only one request hits the server at a time; a 120s AbortController timeout frees a hung request and reports a clear message (timeout vs connection-refused).
 - `start()` now sends the greeting first and kicks `ensureSchedule()` in the background (no longer awaited), so the companion greets immediately instead of waiting on schedule generation.
 
+## 2026-06-11 — Location consistency (priority-ordered prompt + reminder)
+
+- Symptom (b): within a single conversation the model flips the character's location (café → room) even though the schedule slot hasn't changed. Root cause is the model losing track of the current place, not the slot changing.
+- Decision: user proposed A (priority-ordered prompt) + B (lock location during conversation) + C (situation reminder). Pushed back on B per CLAUDE.md #2 — the slot isn't actually changing mid-conversation, so locking it guards a non-event. User agreed: A + C only.
+- A: system prompt (both languages) restructured into the user's explicit priority order ①Persona ②Time ③Place ④Memory ⑤Mood ⑥Affection, with ③ flagged "most easily lost" and an explicit no-teleport / don't-change-location-mid-conversation rule.
+- C: `nowReminderMsgs()` appends a one-line "(Right now you are at X, with Y — do not change location)" as the last message in `genLine` and `chat:send` (history tail = strongest attention). No slot → no reminder. Skipped genAsk to stay minimal.
+- Adopted CLAUDE.md into the repo. Note: automated `node --check` could not be run this session — the sandbox bash mount froze on the pre-edit file (host→sandbox sync bug); edited regions were verified manually for brace/template balance instead. Confirm with `npm start`.
+
 ## 2026-06-10 — Schedule ignoring basic settings (age/role)
 
 - Schedules were generated from `settings.personality` only — name and especially **age** were never passed, so a 16-year-old student could get a "workplace" slot. Added `personaText()` which always composes name + age + how-she-calls-you + personality (+ persona.md if present) and is now used for schedule, relationship, and episode generation. Schedule system prompt also gained explicit rules: match age/role (student→school, never status-inconsistent places), respect weekday/weekend.
