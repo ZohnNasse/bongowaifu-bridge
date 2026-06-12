@@ -260,7 +260,7 @@ function addMsg(cls, text, tag) {
 
 // 메인 프로세스 로그 수신 (자동 발화 등)
 window.api.onLog(({ type, text }) => {
-  if (type === 'say')    addMsg('waifu', text.replace(/^\[\w+\]\s*/, ''), text.match(/^\[(\w+)\]/)?.[1]);
+  if (type === 'say')    addMsg('waifu', text.replace(/^\[[^\]]+\]\s*/, ''), text.match(/^\[([^\]]+)\]/)?.[1]);
   else if (type === 'ask')    addMsg('waifu', text, t('tagAsk'));
   else if (type === 'answer') addMsg('user', text, t('tagAnswer'));
   else if (type === 'error')  addMsg('sys', '⚠ ' + text);
@@ -305,9 +305,11 @@ async function sendChat() {
   tip.textContent = t('typing');
   $('chatLog').appendChild(tip);
   $('chatLog').scrollTop = $('chatLog').scrollHeight;
+  const t0 = performance.now();
   try {
     const r = await window.api.chat(txt);
-    if (r.ok) addMsg('waifu', r.reply);
+    const secs = ((performance.now() - t0) / 1000).toFixed(1) + 's';
+    if (r.ok) addMsg('waifu', r.reply, secs);
     else addMsg('sys', '⚠ ' + r.error);
   } finally {
     tip.remove();

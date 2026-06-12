@@ -760,6 +760,7 @@ async function sayBubbles(text) {
 }
 
 async function speak(state, event, tag) {
+  const t0 = Date.now(); // 생성 소요 시간 측정용
   let line = await fgWrap(genLine(state, event));
   // 최근 대사와 너무 비슷할 때만 1회 재생성 (자주 발생하지 않음)
   const prev = memory.recent.filter(m => m.who === 'waifu').slice(-5).map(m => m.text);
@@ -770,11 +771,12 @@ async function speak(state, event, tag) {
       : ' (방금 떠올린 문장은 이미 했던 말과 겹침 — 완전히 다른 문장으로.)';
     line = await fgWrap(genLine(state, event + note, Math.min(2, +settings.temperature + 0.25)));
   }
+  const secs = ((Date.now() - t0) / 1000).toFixed(1);
   await sayBubbles(line);
   addMemory('event', event);
   addMemory('waifu', line);
   lastSpoke = Date.now();
-  log('say', `[${tag}] ${line}`);
+  log('say', `[${tag} ${secs}s] ${line}`);
 }
 
 async function doAsk(state, topic) {

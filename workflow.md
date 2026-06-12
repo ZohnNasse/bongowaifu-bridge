@@ -162,6 +162,10 @@ Development log for BongoWaifu Bridge. Newest entries at the bottom.
 - llama-server rejected a request with "13086 tokens exceeds context size (8192)". Root cause (read from the log, not guessed): `memForPrompt()` injected User Facts / Relationships / Character Lore in FULL with no cap — only episodes/feelings/diary were trimmed by the CAP loop. After many conversations the accumulated facts alone blew the prompt past the context window.
 - Fix: each of facts (tail 1200), rel (head 700), lore (tail 700) is now length-capped, and the final output is hard-sliced to CAP (2800 chars). The prompt can no longer balloon regardless of how much memory.md has grown. Mount still frozen so `node --check` unavailable; edited region verified manually. Keep ctx 8192 and confirm with `npm start`.
 
+## 2026-06-11 — Response-time display
+
+- Show generation latency next to each chat bubble so the user can gauge model speed. Chat replies: renderer times the `window.api.chat()` round-trip (`performance.now()`) and passes "N.Ns" as the bubble tag. Auto-spoken lines: `speak()` in main times generation (incl. one possible similarity-regen) and embeds it in the log tag as `[tag N.Ns]`; the renderer's `onLog('say')` regex widened from `\w+` to `[^\]]+` to display the full tag. Mount still frozen — `node --check` not run; trivial edits verified manually.
+
 ## 2026-06-10 — Schedule ignoring basic settings (age/role)
 
 - Schedules were generated from `settings.personality` only — name and especially **age** were never passed, so a 16-year-old student could get a "workplace" slot. Added `personaText()` which always composes name + age + how-she-calls-you + personality (+ persona.md if present) and is now used for schedule, relationship, and episode generation. Schedule system prompt also gained explicit rules: match age/role (student→school, never status-inconsistent places), respect weekday/weekend.
