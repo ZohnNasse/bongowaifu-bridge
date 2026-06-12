@@ -247,18 +247,22 @@ function recentEntries(s, n) {
 function memForPrompt() {
   if (!memMd.trim()) return '';
   const p = parseMd(memMd);
-  const CAP = 2800; // 프롬프트 비대화 방지 (속도)
+  const CAP = 2800; // 프롬프트 비대화 방지 (속도·컨텍스트 초과 방지)
+  const tail = (s, n) => s.length > n ? '…' + s.slice(-n) : s; // 최신 항목 우선 보존
+  const facts = tail(p.facts, 1200);  // 사실은 끝에 누적되므로 뒤쪽 유지
+  const rel = p.rel.slice(0, 700);    // 가족·친구는 고정이라 앞쪽
+  const lore = tail(p.lore, 700);
   let epN = 4, feN = 3, diN = 2;
   const build = () =>
-    `[사용자에 대한 기억]\n${p.facts}\n[가족·친구]\n${p.rel}\n[나의 설정]\n${p.lore}\n` +
+    `[사용자에 대한 기억]\n${facts}\n[가족·친구]\n${rel}\n[나의 설정]\n${lore}\n` +
     `[최근 있었던 일]\n${recentEntries(p.episodes, epN)}\n[대화에서 느낀 감정]\n${recentEntries(p.feelings, feN)}\n` +
     `[일기]\n${recentEntries(p.diary, diN)}`;
   let txt = build();
-  while (txt.length > CAP && (diN > 1 || epN > 3 || feN > 2)) {
-    if (diN > 1) diN--; else if (feN > 2) feN--; else epN--;
+  while (txt.length > CAP && (diN > 1 || feN > 1 || epN > 1)) {
+    if (diN > 1) diN--; else if (feN > 1) feN--; else epN--;
     txt = build();
   }
-  return txt;
+  return txt.slice(0, CAP); // 최종 하드 캡 — 어떤 경우에도 프롬프트 폭증 차단
 }
 let askKeys = { textKey: 'text', optKey: 'options' }; // 연결 시 실제 스키마로 갱신
 
