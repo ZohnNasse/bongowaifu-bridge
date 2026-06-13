@@ -14,11 +14,19 @@
 - [x] (배선) memForPrompt → memory.selectForPrompt (query = 최근 사용자 발화 2개), subjectLabel(user→호칭, self→이름)
 - [x] (배선) memory:clear → mem.clear, orphan recentEntries 제거
 - [x] (배선) 시스템 프롬프트 "나/너 구분" = 메신저 프레임(같은 공간 아님) + 즉석 상황극 금지 규칙
-- [ ] 태그 추출 강화 — 추출 프롬프트가 tags+weight를 내도록(현재 태그 비어있음, 관련성은 본문 매칭으로 동작)
-- [ ] (배선) UI 기억 보기에서 항목 표시(type/subject/tags/weight)
-- [ ] 자기점검 한 줄(크랙 차용)
+- [x] 태그 추출 강화 — factSys가 고정 카테고리(A안) tags+weight를 내는 items 형식으로, extractUserFacts가 items 소비
+- [x] (배선) UI 기억 보기에서 항목 표시(type/subject/weight/tags)
+- [x] 자기점검 한 줄(크랙 차용) — 규칙 6
+- [x] 메모리 초기화 재확인 — confirm() 다이얼로그
 - [ ] 회귀 확인 — npm start 부팅 + 기존 기능(스케줄·호감도·TTS·발화)
 - [ ] 커밋 — 논리 단위 분할 (English message)
+
+## 다음 단계 — 인물 탭 (characters.json)
+
+- 고정 프로필(메인/사용자/등장인물) CRUD, 이름=태그, 프로필 우선(모델이 못 바꿈)
+- 관계 = 방향성 그래프(캐릭터↔나, 지인↔나, 지인↔지인) — 인공학원2식, 디자인 노트 4축과 연결
+- 메모리 초기화 시 인물도 초기화 옵션 + 재확인
+- 모순 갱신(이름·나이 등 단일값은 새 값이 옛 값 덮어쓰기), 사용자 정정 우선
 
 ## 결정 필요 (사용자 확인)
 

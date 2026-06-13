@@ -179,6 +179,14 @@ Development log for BongoWaifu Bridge. Newest entries at the bottom.
 - Messenger framing (user request): both system prompts now state "you and {user} chat by text messenger — not in the same place"; ③ clarifies the schedule place is where SHE is and the user isn't there (she texts from it); added rule 5 forbidding improvised roleplay/fictional scenarios. This frames the schedule coherently (she texts you about her day) and stops the "weird setting play".
 - main.js mount still frozen → `node --check` unavailable; all edits are small and were reviewed on the host. Verify with `npm start` (check it boots and chats).
 
+## 2026-06-11 — Memory engine (Phase 1, part 3: tags, UI, confirms, self-check)
+
+- Fixed-category tags (option A): `factSys` (both languages) now outputs `{items:[{type,subject,text,tags,weight}]}` with tags constrained to a fixed list [음식/취향/성격/직업/일상/관계/약속/감정/장소/취미/기타] and weight 1–5. `extractUserFacts` rewritten to consume `items` (feeds engine with tags/weight, mirrors to memMd). Engine still lenient (clamps weight, caps tags) so a stray tag won't break it.
+- UI: settings memory view now lists engine items as `[type|subject|w] text #tags` via `memory:get` returning `mem.getItems()`.
+- Memory reset now asks `confirm()` before clearing (user request); clears engine too.
+- Self-check rule added (rule 6, borrowed from Crack): "before replying, silently check who did this (you/user/third party) and that nothing contradicts your last line" — reinforces the subject-confusion fix.
+- Recorded the 인물 탭 (characters.json) design in MEMORY_ENGINE_PLAN.md: fixed profiles (main/user/NPCs) the model can't alter, name=tag, and the **directional relationship graph** (character↔user, acquaintance↔user, acquaintance↔acquaintance) à la Artificial Academy 2 — next phase. Also queued: contradiction-update (single-value attrs overwrite) + user-correction priority.
+
 ## 2026-06-11 — Response-time display
 
 - Show generation latency next to each chat bubble so the user can gauge model speed. Chat replies: renderer times the `window.api.chat()` round-trip (`performance.now()`) and passes "N.Ns" as the bubble tag. Auto-spoken lines: `speak()` in main times generation (incl. one possible similarity-regen) and embeds it in the log tag as `[tag N.Ns]`; the renderer's `onLog('say')` regex widened from `\w+` to `[^\]]+` to display the full tag. Mount still frozen — `node --check` not run; trivial edits verified manually.

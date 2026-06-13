@@ -207,25 +207,28 @@ async function extractUserFacts(text) {
       { role: 'system', content: L().factSys },
       { role: 'user', content: L().factUser(parseMd(memMd).facts.slice(0, 2000), text) },
     ], 300, 0.3));
-    if (!j) return;
-    const list = (j.facts || []).map(f => String(f).trim()).filter(Boolean);
-    const feeling = String(j.feeling || '').trim();
+    const items = (j && Array.isArray(j.items) ? j.items : []).filter(it => it && String(it.text || '').trim());
+    if (!items.length) return;
+    // 엔진 적립 (태그·가중치 포함)
+    const added = mem.addItems(items);
+    // memMd 미러 (사람이 읽는 용)
     const p = parseMd(memMd);
     let changed = 0;
-    for (const f of list)
-      if (!p.facts.includes(f)) { p.facts += (p.facts ? '\n' : '') + `- ${f}`; changed++; }
-    if (feeling) { // 대화에서 느낀 감정을 날짜별로 적립
-      const stamp = `### ${todayStr()}`;
-      p.feelings = p.feelings.includes(stamp)
-        ? p.feelings + `\n- ${feeling}`
-        : (p.feelings ? p.feelings + '\n\n' : '') + `${stamp}\n- ${feeling}`;
-      changed++;
+    for (const it of items) {
+      const txt = String(it.text).trim();
+      if (it.type === 'feeling') {
+        const stamp = `### ${todayStr()}`;
+        p.feelings = p.feelings.includes(stamp)
+          ? p.feelings + `\n- ${txt}`
+          : (p.feelings ? p.feelings + '\n\n' : '') + `${stamp}\n- ${txt}`;
+        changed++;
+      } else if (!p.facts.includes(txt)) {
+        p.facts += (p.facts ? '\n' : '') + `- ${txt}`;
+        changed++;
+      }
     }
-    if (changed) { memMd = buildMd(p); saveMd(); log('info', `기억 갱신 (사실 ${list.length}, 감정 ${feeling ? '○' : '×'})`); }
-    // 엔진에도 적립 (태그는 다음 단계에서 추출 강화 — 지금은 본문 기반)
-    const items = list.map(f => ({ type: 'user_fact', subject: 'user', text: f, weight: 3 }));
-    if (feeling) items.push({ type: 'feeling', subject: 'self', text: feeling, weight: 2 });
-    mem.addItems(items);
+    if (changed) { memMd = buildMd(p); saveMd(); }
+    if (added) log('info', `기억 +${added} (tags)`);
   } catch {} // 실패해도 대화엔 영향 없음
 }
 
@@ -287,7 +290,8 @@ const STR = {
 2. ③의 장소·상황과 어긋나는 말을 절대 하지 않는다.
 3. 1~2문장으로 자연스럽게. 매번 다른 말. 따옴표·괄호 지문·이름표 금지.
 4. 너는 진짜 ${S.personaName}다. AI나 프로그램 얘기는 절대 안 한다.
-5. 즉석 상황극이나 가상 시나리오를 임의로 만들지 마라. 평범한 메신저 문자 대화처럼, 네 일상을 ${S.userCall}에게 이야기하듯 말한다.`,
+5. 즉석 상황극이나 가상 시나리오를 임의로 만들지 마라. 평범한 메신저 문자 대화처럼, 네 일상을 ${S.userCall}에게 이야기하듯 말한다.
+6. 답하기 전에 속으로 확인한다: 이 일을 한 게 '나'인지 '${S.userCall}'인지 제3자인지, 직전 발화와 모순은 없는지.`,
     lineInstr: e => `지금 상황: ${e}\n→ 이 상황에 ${settings.personaName}답게, 기분과 처지가 묻어나는 1~2문장.`,
     nowReminder: s => `(지금 너는 ${s.place}에 있다${s.with && s.with !== '혼자' ? `, ${s.with}와 함께` : ''} — 장소를 바꾸지 말 것)`,
     askInstr: t => `(상황: ${t}) 사용자에게 물어볼 짧은 질문 1개와 선택지 2~4개를 만들어 JSON만 출력: {"text":"질문","options":["선택1","선택2"]}`,
@@ -317,7 +321,7 @@ const STR = {
     evReact: a => `사용자가 방금 질문에 '${a}'라고 답했다. 그에 맞게 반응한다.`,
     defOpts: ['응', '아니'],
     memCtx: e => `(상황 메모: ${e})`,
-    factSys: '대화에서 (1)사용자에 대한 새로운 사실과 (2)캐릭터가 이번 대화에서 느낀 감정을 추출해 JSON만 출력: {"facts":["사용자에 대한 사실(좋아함/싫어함/성격/직업/일상/약속)"],"feeling":"캐릭터가 느낀 솔직한 감정 한 줄(좋았다/서운했다/설렜다 등) 또는 빈 문자열"}. 사실은 추측 금지·명확한 것만·각 한 문장. 특별한 감정 없으면 feeling은 빈 문자열.',
+    factSys: '대화에서 사용자에 대한 새 사실과 캐릭터가 느낀 감정을 항목으로 추출해 JSON만 출력: {"items":[{"type":"user_fact 또는 feeling","subject":"user_fact는 user, feeling은 self","text":"한 문장","tags":["아래 카테고리 중 1~2개"],"weight":1~5}]}. tags는 반드시 이 목록에서만 고른다: [음식, 취향, 성격, 직업, 일상, 관계, 약속, 감정, 장소, 취미, 기타]. weight는 중요도(이름·약속=5, 사소한 잡담=1~2). 사실은 추측 금지·명시된 것만. 없으면 {"items":[]}.',
     factUser: (known, msg) => `이미 아는 사실(중복 금지):\n${known || '(없음)'}\n\n사용자 메시지: "${msg}"`,
     relSys: '캐릭터의 가족과 친구를 만들어 JSON만 출력: {"people":[{"name":"이름","relation":"관계(엄마/단짝/선배 등)","note":"한 줄 특징"}]}. 4~7명, 캐릭터 설정과 어울리게.',
     relUser: (persona) => `캐릭터 설정:\n${persona || '평범한 인물'}\n\n이 인물의 가족과 친구들을 만들어줘.`,
@@ -356,7 +360,8 @@ const STR = {
 2. Never say anything inconsistent with the place/situation in ③.
 3. 1-2 natural sentences. Always something different. No quotes, stage directions, or name tags.
 4. You are really ${S.personaName}. Never mention being an AI or a program.
-5. Do not invent improvised roleplay or fictional scenarios. Talk like a normal text-messenger chat, telling ${S.userCall} about your day.`,
+5. Do not invent improvised roleplay or fictional scenarios. Talk like a normal text-messenger chat, telling ${S.userCall} about your day.
+6. Before replying, silently check: who did this — you, ${S.userCall}, or a third party — and that nothing contradicts your last message.`,
     lineInstr: e => `Situation now: ${e}\n→ Respond as ${settings.personaName}, with your mood and circumstances showing, in 1-2 sentences.`,
     nowReminder: s => `(Right now you are at ${s.place}${s.with && s.with !== 'alone' ? `, with ${s.with}` : ''} — do not change location.)`,
     askInstr: t => `(Situation: ${t}) Create 1 short question for the user with 2-4 button options. Output JSON only: {"text":"question","options":["opt1","opt2"]}`,
@@ -386,7 +391,7 @@ const STR = {
     evReact: a => `The user just answered '${a}' to your question. React accordingly.`,
     defOpts: ['Yes', 'No'],
     memCtx: e => `(context note: ${e})`,
-    factSys: 'From the conversation, extract (1) new facts about the user and (2) the emotion the character felt this turn. Output JSON only: {"facts":["fact about the user (likes/dislikes/personality/job/life/promises)"],"feeling":"one honest line of how the character felt (happy/hurt/fluttered etc.) or empty string"}. Facts: no guessing, only clear ones, one sentence each. Empty feeling if nothing notable.',
+    factSys: 'Extract new facts about the user and the emotion the character felt, as items. Output JSON only: {"items":[{"type":"user_fact or feeling","subject":"user for user_fact, self for feeling","text":"one sentence","tags":["1-2 from the list below"],"weight":1-5}]}. tags MUST be chosen only from: [food, taste, personality, job, daily, relationship, promise, emotion, place, hobby, etc]. weight = importance (name/promise=5, trivial=1-2). Facts: no guessing, only what is stated. If nothing: {"items":[]}.',
     factUser: (known, msg) => `Already known facts (no duplicates):\n${known || '(none)'}\n\nUser message: "${msg}"`,
     relSys: 'Create the character\'s family and friends. Output JSON only: {"people":[{"name":"name","relation":"relation (mom/best friend/senior etc.)","note":"one-line trait"}]}. 4-7 people, fitting the character.',
     relUser: (persona) => `Character:\n${persona || 'an ordinary person'}\n\nCreate her family and friends.`,
@@ -1024,6 +1029,7 @@ ipcMain.handle('memory:get', () => ({
   ...memory, md: memMd, mdPath: MEMMD_PATH(),
   personaPath: PERSONA_PATH(), hasPersona: !!loadPersonaMd(),
   schedule, schedNow: currentSlot(),
+  items: mem.getItems(),
 }));
 ipcMain.handle('schedule:regen', async () => {
   schedule = { date: '', slots: [] }; // 강제 재생성 (토글 상태 무관)

@@ -195,6 +195,7 @@ const I18N = {
     msgAsking:'질문 생성 중... (게임 화면에서 버튼으로 답해줘)',
     typing:'답변 생성 중',
     memNone:'(요약 없음)', memCount:n=>`— 최근 기억 ${n}줄 보관 중`, memDeleted:'(삭제됨)',
+    confirmMemClear:'정말 모든 기억을 삭제할까요? 되돌릴 수 없습니다.',
     tagAsk:'질문', tagAnswer:'버튼 답변',
   },
   en: {
@@ -224,6 +225,7 @@ const I18N = {
     msgAsking:'Generating question... (answer with the buttons in-game)',
     typing:'thinking',
     memNone:'(no summary)', memCount:n=>`— ${n} recent lines stored`, memDeleted:'(deleted)',
+    confirmMemClear:'Delete ALL memory? This cannot be undone.',
     tagAsk:'Question', tagAnswer:'Button answer',
   },
 };
@@ -363,13 +365,18 @@ $('btnSave').onclick = async () => {
 // 메모리
 $('btnMemRefresh').onclick = async () => {
   const m = await window.api.getMemory();
+  // 엔진 항목 표시 (type/subject/tags/weight)
+  const items = (m.items || []).map(it =>
+    `· [${it.type}|${it.subject}|w${it.weight}] ${it.text}${it.tags && it.tags.length ? '  #' + it.tags.join(' #') : ''}`
+  ).join('\n');
   $('memSummaryView').textContent =
     '♥ ' + (m.affection ?? 30) + '/100\n' +
-    'memory.md: ' + m.mdPath + '\n' +
+    'memory-items: ' + (m.items ? m.items.length : 0) + '개\n' +
     'persona.md: ' + m.personaPath + (m.hasPersona ? ' ✓' : ' (없음/none — persona.md.example 참고)') + '\n\n' +
-    (m.md || t('memNone')) + '\n' + t('memCount')(m.recent.length);
+    (items || t('memNone'));
 };
 $('btnMemClear').onclick = async () => {
+  if (!confirm(t('confirmMemClear'))) return; // 삭제 전 재확인
   await window.api.clearMemory();
   $('memSummaryView').textContent = t('memDeleted');
   addMsg('sys', t('msgMemCleared'));
