@@ -1079,7 +1079,7 @@ app.whenReady().then(() => {
   memory.lastTs = Date.now();
   saveMemory();
   win = new BrowserWindow({
-    width: 900, height: 680,
+    width: 440, height: 820, minWidth: 380, minHeight: 560,
     title: 'BongoWaifu Bridge',
     webPreferences: { preload: path.join(__dirname, 'preload.js') },
   });
