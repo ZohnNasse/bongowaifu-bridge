@@ -1,5 +1,5 @@
 // BongoWaifu <-> llama-server 브릿지 (Electron main)
-const { app, BrowserWindow, ipcMain } = require('electron');
+const { app, BrowserWindow, ipcMain, shell } = require('electron');
 const fs = require('fs');
 const path = require('path');
 const mem = require('./memory'); // 태그·주체·가중치 장기기억 엔진
@@ -295,7 +295,7 @@ const STR = {
     lineInstr: e => `지금 상황: ${e}\n→ 이 상황에 ${settings.personaName}답게, 기분과 처지가 묻어나는 1~2문장.`,
     nowReminder: s => `(지금 너는 ${s.place}에 있다${s.with && s.with !== '혼자' ? `, ${s.with}와 함께` : ''} — 장소를 바꾸지 말 것)`,
     askInstr: t => `(상황: ${t}) 사용자에게 물어볼 짧은 질문 1개와 선택지 2~4개를 만들어 JSON만 출력: {"text":"질문","options":["선택1","선택2"]}`,
-    sumSys: '대화 기록에서 장기 기억으로 남길 것을 추출해 JSON만 출력하라: {"user_facts":["사용자에 대한 새로운 사실 (이름/직업/취향/한 일/약속)"],"character_lore":["캐릭터가 스스로 말한 자기 설정 (직장/취미/경험담)"],"diary":"오늘 대화의 한 단락 요약 (한국어)"}. 이미 기록된 내용과 중복 금지. 새로 알게 된 것이 없으면 빈 배열, diary는 항상 작성.',
+    sumSys: '대화 기록에서 장기 기억으로 남길 것을 추출해 JSON만 출력하라: {"user_facts":["사용자에 대한 새로운 사실 (이름/직업/취향/한 일/약속)"],"character_lore":["캐릭터가 스스로 말한 자기 설정 (직장/취미/경험담)"],"diary":"오늘 대화의 한 단락 요약 (한국어)"}. 이미 기록된 내용과 중복 금지. 모든 텍스트는 반드시 한국어로. 새로 알게 된 것이 없으면 빈 배열, diary는 항상 작성.',
     sumUser: (old, txt) => `이미 기록된 기억:\n${old || '(없음)'}\n\n새 대화 기록:\n${txt}`,
     evGreet: '사용자가 방금 자리에 앉았다. 시간대에 맞는 인사를 건넨다. (시스템이나 앱, 연결에 대한 언급 금지)',
     evHot: l => `콤보 게이지가 레벨 ${l}로 올랐다. 신나게 반응한다.`,
@@ -321,13 +321,13 @@ const STR = {
     evReact: a => `사용자가 방금 질문에 '${a}'라고 답했다. 그에 맞게 반응한다.`,
     defOpts: ['응', '아니'],
     memCtx: e => `(상황 메모: ${e})`,
-    factSys: '대화에서 사용자에 대한 새 사실과 캐릭터가 느낀 감정을 항목으로 추출해 JSON만 출력: {"items":[{"type":"user_fact 또는 feeling","subject":"user_fact는 user, feeling은 self","text":"한 문장","tags":["아래 카테고리 중 1~2개"],"weight":1~5}]}. tags는 반드시 이 목록에서만 고른다: [음식, 취향, 성격, 직업, 일상, 관계, 약속, 감정, 장소, 취미, 기타]. weight는 중요도(이름·약속=5, 사소한 잡담=1~2). 사실은 추측 금지·명시된 것만. 없으면 {"items":[]}.',
+    factSys: '대화에서 사용자에 대한 새 사실과 캐릭터가 느낀 감정을 항목으로 추출해 JSON만 출력: {"items":[{"type":"user_fact 또는 feeling","subject":"user_fact는 user, feeling은 self","text":"한 문장","tags":["아래 카테고리 중 1~2개"],"weight":1~5}]}. tags는 반드시 이 목록에서만 고른다: [음식, 취향, 성격, 직업, 일상, 관계, 약속, 감정, 장소, 취미, 기타]. weight는 중요도(이름·약속=5, 사소한 잡담=1~2). 사실은 추측 금지·명시된 것만. text는 반드시 한국어로. 없으면 {"items":[]}.',
     factUser: (known, msg) => `이미 아는 사실(중복 금지):\n${known || '(없음)'}\n\n사용자 메시지: "${msg}"`,
-    relSys: '캐릭터의 가족과 친구를 만들어 JSON만 출력: {"people":[{"name":"이름","relation":"관계(엄마/단짝/선배 등)","note":"한 줄 특징"}]}. 4~7명, 캐릭터 설정과 어울리게.',
+    relSys: '캐릭터의 가족과 친구를 만들어 JSON만 출력: {"people":[{"name":"이름","relation":"관계(엄마/단짝/선배 등)","note":"한 줄 특징"}]}. 4~7명, 캐릭터 설정과 어울리게. 이름·관계·특징 등 모든 텍스트는 반드시 한국어로 작성(중국어·영어 금지).',
     relUser: (persona) => `캐릭터 설정:\n${persona || '평범한 인물'}\n\n이 인물의 가족과 친구들을 만들어줘.`,
-    epiSys: '캐릭터가 방금 이 일과 시간 동안 실제로 겪은 일을 1인칭 시점으로 1~2문장 만들어라(작은 사건이나 감정 포함). 대사가 아니라 일기처럼. 본문만 출력.',
+    epiSys: '캐릭터가 방금 이 일과 시간 동안 실제로 겪은 일을 1인칭 시점으로 1~2문장 만들어라(작은 사건이나 감정 포함). 대사가 아니라 일기처럼. 반드시 한국어로, 본문만 출력.',
     epiUser: (persona, rel, s) => `캐릭터:\n${persona}\n\n등장인물:\n${rel || '(없음)'}\n\n방금 일과: ${s.start}~${s.end} ${s.place}에서 ${s.with || '혼자'}와(과) ${s.activity}. 여기서 있었던 일.`,
-    schedSys: '캐릭터의 오늘 하루 일과표를 현실적으로 만들어 JSON만 출력: {"slots":[{"start":"HH:MM","end":"HH:MM","place":"장소","activity":"하는 일","with":"같이 있는 사람(없으면 혼자)","transport":"직전 이동 수단(있으면)"}]}. 규칙: ①캐릭터의 나이와 신분에 반드시 맞출 것 — 학생이면 학교/수업/방과후, 직장인이면 회사, 절대 신분에 안 맞는 장소(예: 16살 학생이 직장) 금지. ②평일/주말 구분(주말엔 학교·회사 없음). ③기상~취침까지 빈 시간 없이, 이동 구간도 별도 slot. ④매일 달라야 함(다른 친구/장소/사건). 6~10개 slot.',
+    schedSys: '캐릭터의 오늘 하루 일과표를 현실적으로 만들어 JSON만 출력: {"slots":[{"start":"HH:MM","end":"HH:MM","place":"장소","activity":"하는 일","with":"같이 있는 사람(없으면 혼자)","transport":"직전 이동 수단(있으면)"}]}. 규칙: ①캐릭터의 나이와 신분에 반드시 맞출 것 — 학생이면 학교/수업/방과후, 직장인이면 회사, 절대 신분에 안 맞는 장소(예: 16살 학생이 직장) 금지. ②평일/주말 구분(주말엔 학교·회사 없음). ③기상~취침까지 빈 시간 없이, 이동 구간도 별도 slot. ④매일 달라야 함(다른 친구/장소/사건). 6~10개 slot. 장소·하는 일 등 모든 텍스트는 반드시 한국어로 작성(중국어·영어 금지).',
     schedUser: (persona, dow, date) => `캐릭터 설정:\n${persona || '평범한 인물'}\n\n오늘: ${date} (${dow}). 이 인물의 오늘 일과표를 만들어줘.`,
     dow: ['일요일','월요일','화요일','수요일','목요일','금요일','토요일'],
     nowAt: (s) => s
@@ -393,11 +393,11 @@ const STR = {
     memCtx: e => `(context note: ${e})`,
     factSys: 'Extract new facts about the user and the emotion the character felt, as items. Output JSON only: {"items":[{"type":"user_fact or feeling","subject":"user for user_fact, self for feeling","text":"one sentence","tags":["1-2 from the list below"],"weight":1-5}]}. tags MUST be chosen only from: [food, taste, personality, job, daily, relationship, promise, emotion, place, hobby, etc]. weight = importance (name/promise=5, trivial=1-2). Facts: no guessing, only what is stated. If nothing: {"items":[]}.',
     factUser: (known, msg) => `Already known facts (no duplicates):\n${known || '(none)'}\n\nUser message: "${msg}"`,
-    relSys: 'Create the character\'s family and friends. Output JSON only: {"people":[{"name":"name","relation":"relation (mom/best friend/senior etc.)","note":"one-line trait"}]}. 4-7 people, fitting the character.',
+    relSys: 'Create the character\'s family and friends. Output JSON only: {"people":[{"name":"name","relation":"relation (mom/best friend/senior etc.)","note":"one-line trait"}]}. 4-7 people, fitting the character. Write all text in English.',
     relUser: (persona) => `Character:\n${persona || 'an ordinary person'}\n\nCreate her family and friends.`,
-    epiSys: 'Write, in first person, 1-2 sentences of what the character actually experienced during this scheduled time (include a small event or emotion). Like a diary entry, not dialogue. Output the text only.',
+    epiSys: 'Write, in first person, 1-2 sentences of what the character actually experienced during this scheduled time (include a small event or emotion). Like a diary entry, not dialogue. Output the text only, in English.',
     epiUser: (persona, rel, s) => `Character:\n${persona}\n\nPeople:\n${rel || '(none)'}\n\nThe slot just now: ${s.start}-${s.end} at ${s.place}, ${s.activity} with ${s.with || 'alone'}. What happened.`,
-    schedSys: 'Create a realistic daily schedule for the character. Output JSON only: {"slots":[{"start":"HH:MM","end":"HH:MM","place":"location","activity":"what she does","with":"who she is with (or alone)","transport":"how she got there, if any"}]}. Rules: (1) MUST match the character\'s age and role — a student goes to school/classes/after-school, a worker to a job; never place them somewhere their status forbids (e.g. a 16-year-old student at a workplace). (2) Respect weekday vs weekend (no school/work on weekends). (3) Cover wake to sleep with no gaps, travel as its own slots. (4) Must differ each day (different friends/places/events). 6-10 slots.',
+    schedSys: 'Create a realistic daily schedule for the character. Output JSON only: {"slots":[{"start":"HH:MM","end":"HH:MM","place":"location","activity":"what she does","with":"who she is with (or alone)","transport":"how she got there, if any"}]}. Rules: (1) MUST match the character\'s age and role — a student goes to school/classes/after-school, a worker to a job; never place them somewhere their status forbids (e.g. a 16-year-old student at a workplace). (2) Respect weekday vs weekend (no school/work on weekends). (3) Cover wake to sleep with no gaps, travel as its own slots. (4) Must differ each day (different friends/places/events). 6-10 slots. Write all text (places/activities) in English.',
     schedUser: (persona, dow, date) => `Character:\n${persona || 'an ordinary person'}\n\nToday: ${date} (${dow}). Build her schedule for today.`,
     dow: ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'],
     nowAt: (s) => s
@@ -1031,6 +1031,20 @@ ipcMain.handle('memory:get', () => ({
   schedule, schedNow: currentSlot(),
   items: mem.getItems(),
 }));
+
+// 데이터 파일을 OS 기본 편집기로 열기 (직접 폴더 탐색 불필요)
+ipcMain.handle('file:open', async (_, key) => {
+  const map = {
+    settings: SETTINGS_PATH(), memory: MEMORY_PATH(), memoryItems: MEMITEMS_PATH(),
+    memoryMd: MEMMD_PATH(), persona: PERSONA_PATH(), schedule: SCHED_PATH(),
+  };
+  const p = map[key];
+  if (!p) return { ok: false, error: 'unknown file' };
+  if (!fs.existsSync(p)) { try { fs.writeFileSync(p, key === 'persona' ? '' : '{}'); } catch {} } // 없으면 빈 파일 생성 후 열기
+  const err = await shell.openPath(p);
+  return err ? { ok: false, error: err } : { ok: true };
+});
+ipcMain.handle('file:openFolder', () => { shell.openPath(app.getPath('userData')); return { ok: true }; });
 ipcMain.handle('schedule:regen', async () => {
   schedule = { date: '', slots: [] }; // 강제 재생성 (토글 상태 무관)
   await ensureSchedule(true);

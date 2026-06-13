@@ -150,6 +150,15 @@
         <button id="btnMemRefresh" data-i18n="btnMemRefresh"></button>
         <button id="btnMemClear" data-i18n="btnMemClear"></button>
       </div>
+      <div class="row" style="margin-top:8px;flex-wrap:wrap">
+        <label data-i18n="lblEditFiles"></label>
+        <button data-file="memoryItems">memory-items.json</button>
+        <button data-file="memoryMd">memory.md</button>
+        <button data-file="persona">persona.md</button>
+        <button data-file="schedule">schedule.json</button>
+        <button data-file="settings">settings.json</button>
+        <button id="btnOpenFolder" data-i18n="btnOpenFolder"></button>
+      </div>
     </fieldset>
 
     <div class="row" style="align-items:center">
@@ -196,6 +205,7 @@ const I18N = {
     typing:'답변 생성 중',
     memNone:'(요약 없음)', memCount:n=>`— 최근 기억 ${n}줄 보관 중`, memDeleted:'(삭제됨)',
     confirmMemClear:'정말 모든 기억을 삭제할까요? 되돌릴 수 없습니다.',
+    lblEditFiles:'파일 편집:', btnOpenFolder:'폴더 열기',
     tagAsk:'질문', tagAnswer:'버튼 답변',
   },
   en: {
@@ -226,6 +236,7 @@ const I18N = {
     typing:'thinking',
     memNone:'(no summary)', memCount:n=>`— ${n} recent lines stored`, memDeleted:'(deleted)',
     confirmMemClear:'Delete ALL memory? This cannot be undone.',
+    lblEditFiles:'Edit files:', btnOpenFolder:'Open folder',
     tagAsk:'Question', tagAnswer:'Button answer',
   },
 };
@@ -381,6 +392,12 @@ $('btnMemClear').onclick = async () => {
   $('memSummaryView').textContent = t('memDeleted');
   addMsg('sys', t('msgMemCleared'));
 };
+// 데이터 파일 열기 버튼 (기본 편집기로)
+document.querySelectorAll('button[data-file]').forEach(b => b.onclick = async () => {
+  const r = await window.api.openFile(b.dataset.file);
+  if (!r.ok) addMsg('sys', '⚠ ' + (r.error || 'open failed'));
+});
+$('btnOpenFolder').onclick = () => window.api.openFolder();
 
 // ─────────── TTS (서버 우선, 실패/미설정 시 OS 내장 음성 폴백) ───────────
 let ttsCfg = { enable: false, url: '', voice: '', rate: 1 };

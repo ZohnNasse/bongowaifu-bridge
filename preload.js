@@ -15,4 +15,6 @@ contextBridge.exposeInMainWorld('api', {
   onLog: (cb) => ipcRenderer.on('log', (_, d) => cb(d)),
   onTts: (cb) => ipcRenderer.on('tts', (_, d) => cb(d)),
   ttsSynth: (t) => ipcRenderer.invoke('tts:synth', t),
+  openFile: (key) => ipcRenderer.invoke('file:open', key),
+  openFolder: () => ipcRenderer.invoke('file:openFolder'),
 });

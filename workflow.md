@@ -187,6 +187,15 @@ Development log for BongoWaifu Bridge. Newest entries at the bottom.
 - Self-check rule added (rule 6, borrowed from Crack): "before replying, silently check who did this (you/user/third party) and that nothing contradicts your last line" — reinforces the subject-confusion fix.
 - Recorded the 인물 탭 (characters.json) design in MEMORY_ENGINE_PLAN.md: fixed profiles (main/user/NPCs) the model can't alter, name=tag, and the **directional relationship graph** (character↔user, acquaintance↔user, acquaintance↔acquaintance) à la Artificial Academy 2 — next phase. Also queued: contradiction-update (single-value attrs overwrite) + user-correction priority.
 
+## 2026-06-11 — Chinese output fix
+
+- After clearing+regenerating memory, generated content (relationships/schedule names+places) came out in Chinese — Qwen (Chinese-origin) defaults to Chinese when the content language isn't pinned. The generation prompts didn't pin output language. Added an explicit language directive to BOTH language variants (ko prompts → "한국어로", en prompts relSys/epiSys/schedSys → "in English") so generation follows the app's configured language (settings.language via L()), not a hardcoded one. Fix takes effect after restart + clear + regenerate.
+
+## 2026-06-11 — In-app file edit buttons
+
+- User wants to edit the data files without navigating folders. Added `shell.openPath`-based IPC `file:open` (keys: settings/memory/memoryItems/memoryMd/persona/schedule; creates an empty file first if missing) and `file:openFolder`. preload exposes `openFile`/`openFolder`. Settings → memory section now has a "파일 편집" row with one button per file (memory-items.json, memory.md, persona.md, schedule.json, settings.json) plus "폴더 열기" — each opens the file in the OS default editor. (In-app textarea editing could come later; open-in-editor is the low-risk v1.)
+- Mount frozen for all edited files this session → `node --check` unavailable; edits reviewed on host. Verify with `npm start`.
+
 ## 2026-06-11 — Response-time display
 
 - Show generation latency next to each chat bubble so the user can gauge model speed. Chat replies: renderer times the `window.api.chat()` round-trip (`performance.now()`) and passes "N.Ns" as the bubble tag. Auto-spoken lines: `speak()` in main times generation (incl. one possible similarity-regen) and embeds it in the log tag as `[tag N.Ns]`; the renderer's `onLog('say')` regex widened from `\w+` to `[^\]]+` to display the full tag. Mount still frozen — `node --check` not run; trivial edits verified manually.
