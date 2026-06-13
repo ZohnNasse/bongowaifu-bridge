@@ -162,6 +162,23 @@ Development log for BongoWaifu Bridge. Newest entries at the bottom.
 - llama-server rejected a request with "13086 tokens exceeds context size (8192)". Root cause (read from the log, not guessed): `memForPrompt()` injected User Facts / Relationships / Character Lore in FULL with no cap — only episodes/feelings/diary were trimmed by the CAP loop. After many conversations the accumulated facts alone blew the prompt past the context window.
 - Fix: each of facts (tail 1200), rel (head 700), lore (tail 700) is now length-capped, and the final output is hard-sliced to CAP (2800 chars). The prompt can no longer balloon regardless of how much memory.md has grown. Mount still frozen so `node --check` unavailable; edited region verified manually. Keep ctx 8192 and confirm with `npm start`.
 
+## 2026-06-11 — Memory engine (Phase 1, part 1: the engine)
+
+- Design in MEMORY_ENGINE_PLAN.md, tasks in checklist.md. Goal: tag/weight-based persistent memory with subject marking to fix (2) self/other confusion and (3) weighted recall; (1) Korean fluency only improves indirectly (model-bound).
+- Crack analysis: its "memory" is brute-force 200k context + prompt self-check, no real long-term memory. Validates that our small-context setup *needs* selective tagged retrieval, and that fluency is model-bound. Borrowing only its cheap prompt-level consistency self-check.
+- Built `memory.js` as a standalone, dependency-free module (storage + retrieval are pure logic, so it is node-checkable despite the frozen main.js mount; LLM extraction stays in main.js and feeds items in). API: load/save/addItem(s)/migrateFromMd/selectForPrompt/getItems/clear. Items = {id,type,subject,text,tags,weight,date,lastUsed}.
+- selectForPrompt scores by weight + recency + tag/text relevance to the current conversation, renders with subject prefixes ("(오빠)/(나)"), skips prefix for relationship items, budget-capped. Verified: `node --check` passed and a functional test (migrate 5 items, subject prefixes, tag search ranking 미카 items up) passed before the mount froze.
+- Module is inert until wired into main.js (next step), so it is safe to commit on its own.
+
+## 2026-06-11 — Memory engine (Phase 1, part 2: wiring) + messenger framing
+
+- Wired memory.js into main.js: require `mem`; new `MEMITEMS_PATH` = memory-items.json (separate from the legacy memory.json which still holds recent/affection/summary); boot loads engine + `migrateFromMd(memMd)` once.
+- `memForPrompt()` now reads from the engine — `mem.selectForPrompt(query, {budget, subjectLabel})` where query = last 2 user messages and subjectLabel maps user→userCall, self→personaName. Removed the now-orphan `recentEntries()`.
+- All extraction paths also feed the engine via `mem.addItems` (extractUserFacts: facts+feeling; maybeSummarize: user_facts+character_lore; episode; relationships) while keeping the memMd writes intact (non-breaking interim; memMd still used by the UI memory view). `memory:clear` also clears the engine.
+- Note: tags are empty for now (relevance falls back to text overlap) — extraction-prompt tag/weight enrichment is the next item. UI item display and the self-check line also pending.
+- Messenger framing (user request): both system prompts now state "you and {user} chat by text messenger — not in the same place"; ③ clarifies the schedule place is where SHE is and the user isn't there (she texts from it); added rule 5 forbidding improvised roleplay/fictional scenarios. This frames the schedule coherently (she texts you about her day) and stops the "weird setting play".
+- main.js mount still frozen → `node --check` unavailable; all edits are small and were reviewed on the host. Verify with `npm start` (check it boots and chats).
+
 ## 2026-06-11 — Response-time display
 
 - Show generation latency next to each chat bubble so the user can gauge model speed. Chat replies: renderer times the `window.api.chat()` round-trip (`performance.now()`) and passes "N.Ns" as the bubble tag. Auto-spoken lines: `speak()` in main times generation (incl. one possible similarity-regen) and embeds it in the log tag as `[tag N.Ns]`; the renderer's `onLog('say')` regex widened from `\w+` to `[^\]]+` to display the full tag. Mount still frozen — `node --check` not run; trivial edits verified manually.

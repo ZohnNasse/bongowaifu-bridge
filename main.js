@@ -2,6 +2,7 @@
 const { app, BrowserWindow, ipcMain } = require('electron');
 const fs = require('fs');
 const path = require('path');
+const mem = require('./memory'); // 태그·주체·가중치 장기기억 엔진
 
 let win = null;
 let loopTimer = null;
@@ -21,6 +22,7 @@ const MEMORY_PATH   = () => path.join(app.getPath('userData'), 'memory.json');
 const MEMMD_PATH    = () => path.join(app.getPath('userData'), 'memory.md');
 const PERSONA_PATH  = () => path.join(app.getPath('userData'), 'persona.md');
 const SCHED_PATH    = () => path.join(app.getPath('userData'), 'schedule.json');
+const MEMITEMS_PATH = () => path.join(app.getPath('userData'), 'memory-items.json'); // 엔진 항목 저장소
 
 const DEFAULTS = {
   // 언어 ('ko' | 'en') — UI와 캐릭터 발화 언어
@@ -112,11 +114,15 @@ async function ensureRelationships() {
       { role: 'user', content: L().relUser(personaText()) },
     ], 500, 0.6));
     if (!j) return;
-    const list = (j.people || [])
-      .filter(x => x && x.name).map(x => `- ${x.name} (${x.relation || ''}): ${x.note || ''}`);
+    const people = (j.people || []).filter(x => x && x.name);
+    const list = people.map(x => `- ${x.name} (${x.relation || ''}): ${x.note || ''}`);
     if (!list.length) return;
     p.rel = list.join('\n');
     memMd = buildMd(p); saveMd();
+    mem.addItems(people.map(x => ({
+      type: 'relationship', subject: 'relationship',
+      text: `${x.name} (${x.relation || ''}): ${x.note || ''}`, tags: [x.name], weight: 4,
+    })));
     log('info', `relationships seeded (${list.length})`);
   } catch (e) { log('info', `relationships failed: ${e.message}`); }
 }
@@ -171,6 +177,7 @@ async function maybeNarrateEpisode() {
     if (epi) {
       p.episodes = (p.episodes ? p.episodes + '\n\n' : '') + `### ${todayStr()} ${s.start}-${s.end} ${s.place}\n- ${epi}`;
       memMd = buildMd(p); saveMd();
+      mem.addItems([{ type: 'episode', subject: 'self', text: epi, tags: [s.place], weight: 2 }]);
       log('info', `오늘 있었던 일 기록: ${s.place}`);
     }
     schedule.narrated.push(idx); saveSched();
@@ -215,6 +222,10 @@ async function extractUserFacts(text) {
       changed++;
     }
     if (changed) { memMd = buildMd(p); saveMd(); log('info', `기억 갱신 (사실 ${list.length}, 감정 ${feeling ? '○' : '×'})`); }
+    // 엔진에도 적립 (태그는 다음 단계에서 추출 강화 — 지금은 본문 기반)
+    const items = list.map(f => ({ type: 'user_fact', subject: 'user', text: f, weight: 3 }));
+    if (feeling) items.push({ type: 'feeling', subject: 'self', text: feeling, weight: 2 });
+    mem.addItems(items);
   } catch {} // 실패해도 대화엔 영향 없음
 }
 
@@ -237,32 +248,14 @@ function buildMd(p) {
          `## Character Lore\n${p.lore || ''}\n\n## Episodes\n${p.episodes || ''}\n\n` +
          `## Feelings\n${p.feelings || ''}\n\n## Diary\n${p.diary || ''}\n`;
 }
-// 섹션에서 최근 N개 엔트리만 (### 구분)
-function recentEntries(s, n) {
-  if (!s) return '';
-  return s.split(/\n(?=### )/).slice(-n).join('\n');
-}
 
-// 프롬프트용 발췌 (총량 캡 — 64k 컨텍스트면 여유). 사실/관계/설정은 항상, 일화·감정·일기는 최신 위주.
+// 프롬프트용 기억 — 엔진에서 현재 대화에 관련된 항목만 골라 주체 접두사로 렌더
 function memForPrompt() {
-  if (!memMd.trim()) return '';
-  const p = parseMd(memMd);
-  const CAP = 2800; // 프롬프트 비대화 방지 (속도·컨텍스트 초과 방지)
-  const tail = (s, n) => s.length > n ? '…' + s.slice(-n) : s; // 최신 항목 우선 보존
-  const facts = tail(p.facts, 1200);  // 사실은 끝에 누적되므로 뒤쪽 유지
-  const rel = p.rel.slice(0, 700);    // 가족·친구는 고정이라 앞쪽
-  const lore = tail(p.lore, 700);
-  let epN = 4, feN = 3, diN = 2;
-  const build = () =>
-    `[사용자에 대한 기억]\n${facts}\n[가족·친구]\n${rel}\n[나의 설정]\n${lore}\n` +
-    `[최근 있었던 일]\n${recentEntries(p.episodes, epN)}\n[대화에서 느낀 감정]\n${recentEntries(p.feelings, feN)}\n` +
-    `[일기]\n${recentEntries(p.diary, diN)}`;
-  let txt = build();
-  while (txt.length > CAP && (diN > 1 || feN > 1 || epN > 1)) {
-    if (diN > 1) diN--; else if (feN > 1) feN--; else epN--;
-    txt = build();
-  }
-  return txt.slice(0, CAP); // 최종 하드 캡 — 어떤 경우에도 프롬프트 폭증 차단
+  // 현재 화제 = 최근 사용자 발화 2개 (태그/키워드 매칭용)
+  const query = memory.recent.filter(m => m.who === 'user').slice(-2).map(m => m.text).join(' ');
+  const subjectLabel = s =>
+    s === 'user' ? settings.userCall : s === 'self' ? settings.personaName : s;
+  return mem.selectForPrompt(query, { budget: 2400, subjectLabel });
 }
 let askKeys = { textKey: 'text', optKey: 'options' }; // 연결 시 실제 스키마로 갱신
 
@@ -278,12 +271,12 @@ function pickAskKeys(def) {
 const STR = {
   ko: {
     sys: (S, ch, timeStr, mins, summary, aff, tier, moodLabel, nowAt) =>
-`너는 '${S.personaName}'(이)라는 살아있는 사람이다. 아래를 ①~⑥ 우선순위로 지켜 연기한다 (위일수록 절대 우선).
+`너는 '${S.personaName}'(이)라는 살아있는 사람이다. 너와 ${S.userCall}는 메신저로 문자를 주고받는 사이다 — 같은 공간에 있지 않고, 각자 다른 곳에서 메시지로만 대화한다. 아래를 ①~⑥ 우선순위로 지켜 연기한다 (위일수록 절대 우선).
 
 ① 페르소나: ${S.personaName}, ${S.personaAge}살. ${S.personality} ${S.userCall}(이)라고 부른다. 말투: ${S.speechStyle}
 ② 시간: 지금 ${timeStr}, ${S.userCall}는 ${mins}분째 작업 중. (새벽=건강 걱정, 밤=차분, 2시간 넘으면 가끔 쉬라고.)
 ③ 장소·상황 ★가장 흔들리기 쉬움★: ${nowAt}
-   → 이 장소가 지금의 확정 사실이다. 이전 대화에서 다른 장소가 나왔어도 무시하고, 한 대화 안에서 장소를 절대 바꾸지 마라. "방금까지 카페였는데 갑자기 방"처럼 순간이동하지 않는다.
+   → 이건 '네가' 있는 곳이고, ${S.userCall}는 거기 없다. 너는 그곳에서 ${S.userCall}에게 문자를 보내는 것이다. 한 대화 안에서 네 장소를 절대 바꾸지 말고, "방금까지 카페였는데 갑자기 방"처럼 순간이동하지 않는다.
 ④ 기억 (자연스럽게 활용, 통째로 읊지 말 것): ${summary || '(아직 특별한 기억 없음)'}
 ⑤ 기분: ${moodLabel}. 이 기분이 그대로 말투에 드러나야 한다.
 ⑥ ${S.userCall}와의 사이: ${tier} (호감도 ${aff}/100). 친밀도에 맞는 거리감 — 낮으면 데면데면, 높으면 다정하게.
@@ -293,7 +286,8 @@ const STR = {
 1. 위 항목을 설명하거나 나열하지 마라. 성격·기분은 '말투와 내용'으로만 드러낸다 ("나 지금 심심해"는 OK, "내 성격은~"은 금지).
 2. ③의 장소·상황과 어긋나는 말을 절대 하지 않는다.
 3. 1~2문장으로 자연스럽게. 매번 다른 말. 따옴표·괄호 지문·이름표 금지.
-4. 너는 진짜 ${S.personaName}다. AI나 프로그램 얘기는 절대 안 한다.`,
+4. 너는 진짜 ${S.personaName}다. AI나 프로그램 얘기는 절대 안 한다.
+5. 즉석 상황극이나 가상 시나리오를 임의로 만들지 마라. 평범한 메신저 문자 대화처럼, 네 일상을 ${S.userCall}에게 이야기하듯 말한다.`,
     lineInstr: e => `지금 상황: ${e}\n→ 이 상황에 ${settings.personaName}답게, 기분과 처지가 묻어나는 1~2문장.`,
     nowReminder: s => `(지금 너는 ${s.place}에 있다${s.with && s.with !== '혼자' ? `, ${s.with}와 함께` : ''} — 장소를 바꾸지 말 것)`,
     askInstr: t => `(상황: ${t}) 사용자에게 물어볼 짧은 질문 1개와 선택지 2~4개를 만들어 JSON만 출력: {"text":"질문","options":["선택1","선택2"]}`,
@@ -346,12 +340,12 @@ const STR = {
   },
   en: {
     sys: (S, ch, timeStr, mins, summary, aff, tier, moodLabel, nowAt) =>
-`You are '${S.personaName}', a living person. Follow the priority order ①–⑥ below (higher = absolute priority).
+`You are '${S.personaName}', a living person. You and ${S.userCall} chat by text messenger — you are NOT in the same place; you talk only through messages from wherever each of you is. Follow the priority order ①–⑥ below (higher = absolute priority).
 
 ① Persona: ${S.personaName}, ${S.personaAge} y/o. ${S.personality} You call them '${S.userCall}'. Speech: ${S.speechStyle}
 ② Time: it's ${timeStr}; ${S.userCall} has worked ${mins} min straight. (late night=worry about health, evening=calm, past 2h suggest a break.)
 ③ Place/situation ★most easily lost★: ${nowAt}
-   → This place is the fixed fact right now. Ignore any other place from earlier turns, and never change location within one conversation. No teleporting like "was at the café, suddenly in my room".
+   → This is where YOU are; ${S.userCall} is NOT there. You are texting ${S.userCall} from that place. Never change your location within one conversation. No teleporting like "was at the café, suddenly in my room".
 ④ Memory (use naturally, never recite wholesale): ${summary || '(no notable memories yet)'}
 ⑤ Mood: ${moodLabel}. This mood must come through in how you talk.
 ⑥ With ${S.userCall}: ${tier} (affection ${aff}/100). Match your closeness — reserved if low, warm if high.
@@ -361,7 +355,8 @@ const STR = {
 1. Never explain or list the items above. Show personality/mood only through tone and content ("I'm bored right now" is fine; "my personality is~" is not).
 2. Never say anything inconsistent with the place/situation in ③.
 3. 1-2 natural sentences. Always something different. No quotes, stage directions, or name tags.
-4. You are really ${S.personaName}. Never mention being an AI or a program.`,
+4. You are really ${S.personaName}. Never mention being an AI or a program.
+5. Do not invent improvised roleplay or fictional scenarios. Talk like a normal text-messenger chat, telling ${S.userCall} about your day.`,
     lineInstr: e => `Situation now: ${e}\n→ Respond as ${settings.personaName}, with your mood and circumstances showing, in 1-2 sentences.`,
     nowReminder: s => `(Right now you are at ${s.place}${s.with && s.with !== 'alone' ? `, with ${s.with}` : ''} — do not change location.)`,
     askInstr: t => `(Situation: ${t}) Create 1 short question for the user with 2-4 button options. Output JSON only: {"text":"question","options":["opt1","opt2"]}`,
@@ -625,6 +620,11 @@ async function maybeSummarize() {
     memMd = buildMd(p);
     saveMd();
     log('info', 'memory.md updated');
+    // 엔진에도 적립
+    mem.addItems([
+      ...(j.user_facts || []).map(f => ({ type: 'user_fact', subject: 'user', text: f, weight: 3 })),
+      ...(j.character_lore || []).map(f => ({ type: 'char_lore', subject: 'self', text: f, weight: 3 })),
+    ]);
   } catch (e) {
     memory.recent.unshift(...old); // 실패 시 기억 보존
     log('info', `memory extraction failed, kept raw: ${e.message}`);
@@ -1033,6 +1033,7 @@ ipcMain.handle('schedule:regen', async () => {
 ipcMain.handle('memory:clear', () => {
   memory = { recent: [], summary: '', affection: 30, lastTs: Date.now() };
   memMd = '';
+  mem.clear();
   saveMemory(); saveMd();
   return { ok: true };
 });
@@ -1048,6 +1049,10 @@ app.whenReady().then(() => {
     memMd = buildMd({ facts: '', lore: '', diary: `### (migrated)\n- ${memory.summary}` });
     saveMd();
   }
+  // 장기기억 엔진 로드 + memory.md에서 1회 마이그레이션
+  mem.load(MEMITEMS_PATH());
+  const migrated = mem.migrateFromMd(memMd);
+  if (migrated) log('info', `memory engine: migrated ${migrated} items`);
   // 오래 안 보면 호감도 소폭 감소 (하루 -2)
   const days = memory.lastTs ? Math.floor((Date.now() - memory.lastTs) / 86400000) : 0;
   if (days > 0) memory.affection = Math.max(0, (+memory.affection || 30) - 2 * days);
