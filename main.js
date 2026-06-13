@@ -1,5 +1,5 @@
 // BongoWaifu <-> llama-server 브릿지 (Electron main)
-const { app, BrowserWindow, ipcMain, shell } = require('electron');
+const { app, BrowserWindow, ipcMain, shell, Menu } = require('electron');
 const fs = require('fs');
 const path = require('path');
 const mem = require('./memory'); // 태그·주체·가중치 장기기억 엔진
@@ -27,6 +27,8 @@ const MEMITEMS_PATH = () => path.join(app.getPath('userData'), 'memory-items.jso
 const DEFAULTS = {
   // 언어 ('ko' | 'en') — UI와 캐릭터 발화 언어
   language: 'ko',
+  theme: 'midnight', // 색 테마
+
   // 연결
   bongoPort: 7337,
   llamaUrl: 'http://127.0.0.1:8001/v1/chat/completions',
@@ -1078,9 +1080,11 @@ app.whenReady().then(() => {
   if (days > 0) memory.affection = Math.max(0, (+memory.affection || 30) - 2 * days);
   memory.lastTs = Date.now();
   saveMemory();
+  Menu.setApplicationMenu(null); // 상단 File/Edit/View 메뉴바 제거
   win = new BrowserWindow({
     width: 440, height: 820, minWidth: 380, minHeight: 560,
     title: 'BongoWaifu Bridge',
+    autoHideMenuBar: true,
     webPreferences: { preload: path.join(__dirname, 'preload.js') },
   });
   win.loadFile('index.html');

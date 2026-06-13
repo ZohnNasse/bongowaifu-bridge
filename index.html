@@ -7,8 +7,12 @@
   :root { --bg:#16161e; --panel:#1f1f2b; --line:#2e2e3e; --txt:#e6e6ef; --dim:#8a8a9e; --acc:#e879a8; --acc2:#7aa2f7; }
   * { box-sizing:border-box; margin:0; }
   body { background:var(--bg); color:var(--txt); font:14px/1.5 'Segoe UI', sans-serif; height:100vh; display:flex; flex-direction:column; }
-  header { display:flex; align-items:center; gap:8px; padding:10px 14px; border-bottom:1px solid var(--line); flex-wrap:wrap; }
-  header h1 { font-size:15px; margin-right:auto; }
+  header { display:flex; align-items:center; gap:8px; padding:10px 12px; border-bottom:1px solid var(--line); flex-wrap:nowrap; }
+  header h1 { font-size:14px; flex:1 1 auto; min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  header > :not(h1) { flex:0 0 auto; }
+  header #language { padding:5px 6px; font-size:12px; }
+  #statusTxt { font-size:11px; }
+  #btnToggle { padding:6px 12px; }
   .dot { width:10px; height:10px; border-radius:50%; background:#666; }
   .dot.on { background:#4ade80; }
   button { background:var(--panel); color:var(--txt); border:1px solid var(--line); border-radius:8px; padding:6px 14px; cursor:pointer; transition:background .15s, border-color .15s; }
@@ -65,7 +69,7 @@
 </head>
 <body>
 <header>
-  <h1>BongoWaifu Bridge</h1>
+  <h1>BongoWaifu</h1>
   <select id="language" title="Language">
     <option value="ko">한국어</option>
     <option value="en">English</option>
@@ -94,6 +98,18 @@
 
   <!-- 설정 -->
   <div class="page" id="page-settings">
+    <fieldset><legend data-i18n="legTheme"></legend>
+      <div class="row"><label data-i18n="lblTheme"></label>
+        <select id="theme">
+          <option value="midnight">Midnight Rose</option>
+          <option value="ocean">Ocean</option>
+          <option value="forest">Forest</option>
+          <option value="grape">Grape</option>
+          <option value="daylight">Daylight</option>
+        </select>
+      </div>
+    </fieldset>
+
     <fieldset><legend data-i18n="legPersona"></legend>
       <div class="row"><label data-i18n="lblName"></label><input type="text" id="personaName"></div>
       <div class="row"><label data-i18n="lblAge"></label><input type="text" id="personaAge"></div>
@@ -183,7 +199,7 @@
 
 <script>
 const $ = id => document.getElementById(id);
-const FIELDS_TXT = ['language','personaName','personaAge','userCall','personality','speechStyle','llamaUrl','llamaModel','ttsMode','ttsUrl','ttsVoice'];
+const FIELDS_TXT = ['language','theme','personaName','personaAge','userCall','personality','speechStyle','llamaUrl','llamaModel','ttsMode','ttsUrl','ttsVoice'];
 const FIELDS_NUM = ['bongoPort','temperature','maxTokens','pollSec','idleSec','askChance','memRecent','ttsRate','ttsSpeaker'];
 const FIELDS_CHK = ['trigGreet','trigHot','trigAchv','trigIdle','trigAsk','memSummary','ttsEnable','schedEnable'];
 let running = false;
@@ -219,6 +235,7 @@ const I18N = {
     memNone:'(요약 없음)', memCount:n=>`— 최근 기억 ${n}줄 보관 중`, memDeleted:'(삭제됨)',
     confirmMemClear:'정말 모든 기억을 삭제할까요? 되돌릴 수 없습니다.',
     lblEditFiles:'파일 편집:', btnOpenFolder:'폴더 열기',
+    legTheme:'테마', lblTheme:'색 테마',
     tagAsk:'질문', tagAnswer:'버튼 답변',
   },
   en: {
@@ -250,6 +267,7 @@ const I18N = {
     memNone:'(no summary)', memCount:n=>`— ${n} recent lines stored`, memDeleted:'(deleted)',
     confirmMemClear:'Delete ALL memory? This cannot be undone.',
     lblEditFiles:'Edit files:', btnOpenFolder:'Open folder',
+    legTheme:'Theme', lblTheme:'Color theme',
     tagAsk:'Question', tagAnswer:'Button answer',
   },
 };
@@ -265,6 +283,21 @@ function applyLang(l) {
   $('btnToggle').textContent = running ? t('btnStop') : t('btnStart');
 }
 $('language').onchange = () => applyLang($('language').value); // 즉시 미리보기 (저장해야 발화 언어 반영)
+
+// 색 테마 프리셋 (CSS 변수 세트)
+const THEMES = {
+  midnight: { bg:'#16161e', panel:'#1f1f2b', line:'#2e2e3e', txt:'#e6e6ef', dim:'#8a8a9e', acc:'#e879a8', acc2:'#7aa2f7' },
+  ocean:    { bg:'#0f1720', panel:'#1b2733', line:'#2a3a48', txt:'#e6eef5', dim:'#8aa0b0', acc:'#38bdf8', acc2:'#818cf8' },
+  forest:   { bg:'#14201a', panel:'#1d2c24', line:'#2c4033', txt:'#e8f0e8', dim:'#8ba596', acc:'#5fbf80', acc2:'#cbb06a' },
+  grape:    { bg:'#1a1424', panel:'#261b33', line:'#3a2c4d', txt:'#efe8f5', dim:'#a08ab0', acc:'#a674e8', acc2:'#f06aa8' },
+  daylight: { bg:'#f4f0f5', panel:'#ffffff', line:'#e6dde8', txt:'#2a2230', dim:'#9a8a9a', acc:'#e0518a', acc2:'#6b8cff' },
+};
+function applyTheme(name) {
+  const th = THEMES[name] || THEMES.midnight;
+  const r = document.documentElement.style;
+  for (const k in th) r.setProperty('--' + k, th[k]);
+}
+$('theme').onchange = () => applyTheme($('theme').value); // 즉시 적용
 
 // 탭
 document.querySelectorAll('.tabs button').forEach(b => b.onclick = () => {
@@ -390,6 +423,7 @@ async function loadSettings() {
   FIELDS_NUM.forEach(k => $(k).value = s[k]);
   FIELDS_CHK.forEach(k => $(k).checked = !!s[k]);
   syncTtsCfg(s);
+  applyTheme(s.theme);
   applyLang(s.language);
 }
 $('btnSave').onclick = async () => {
