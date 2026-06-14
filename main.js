@@ -140,11 +140,14 @@ async function ensureSchedule(force) {
     await ensureRelationships(); // 친구/가족 먼저 — 일과에 이름이 등장하도록
     const now = new Date();
     const persona = personaText() + '\n등장인물:\n' + parseMd(memMd).rel;
-    const j = looseJson(await llama([
+    // 일과표 JSON이 커서 토큰 넉넉히(1800) + 1회 재시도 — 잘림으로 인한 파싱 실패 방지
+    const ask = () => llama([
       { role: 'system', content: L().schedSys },
       { role: 'user', content: L().schedUser(persona, L().dow[now.getDay()], todayStr()) },
-    ], 900, 0.5));
-    if (!j) throw new Error('JSON 파싱 실패 (모델 응답 형식 문제)');
+    ], 1800, 0.5);
+    let j = looseJson(await ask());
+    if (!j || !(j.slots || []).length) j = looseJson(await ask());
+    if (!j) throw new Error('JSON 파싱 실패 (모델 응답 형식 문제 — max tokens 부족 또는 think 미차단)');
     const slots = (j.slots || []).filter(s => s.start && s.end && s.place);
     if (!slots.length) throw new Error('빈 일과표');
     schedule = { date: todayStr(), slots, narrated: [] };
