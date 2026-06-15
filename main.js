@@ -65,7 +65,7 @@ const DEFAULTS = {
 };
 
 let settings = { ...DEFAULTS };
-let memory = { recent: [], summary: '', affection: 30, lastTs: 0 }; // affection 0~100 영속
+let memory = { recent: [], affection: 30, lastTs: 0 }; // 단기/상태 전용 (장기기억은 memory.js 엔진)
 let mood = 'neutral'; // 단기 기분: neutral|happy|excited|bored
 
 function bumpAff(d) {
@@ -80,11 +80,6 @@ function pickIdleTopic() {
   if (!idleBag.length) idleBag = topics.map((_, i) => i).sort(() => Math.random() - 0.5);
   return topics[idleBag.pop()];
 }
-
-// ─────────── memory.md (장기기억 — Honcho식 사실 추출) ───────────
-let memMd = '';
-function loadMd() { try { memMd = fs.readFileSync(MEMMD_PATH(), 'utf8'); } catch { memMd = ''; } }
-function saveMd() { try { fs.writeFileSync(MEMMD_PATH(), memMd); } catch {} }
 
 // persona.md — 사용자가 작성한 캐릭터 시트 (매 발화마다 읽어 수정 즉시 반영)
 function loadPersonaMd() {
@@ -108,8 +103,7 @@ const todayStr = () => new Date().toLocaleDateString('en-CA'); // YYYY-MM-DD 로
 
 // 가족·친구가 없으면 1회 생성 (영속)
 async function ensureRelationships() {
-  const p = parseMd(memMd);
-  if (p.rel.trim()) return;
+  if (mem.byType('relationship').length) return; // 이미 있으면 스킵
   try {
     const j = looseJson(await llama([
       { role: 'system', content: L().relSys },
@@ -117,15 +111,12 @@ async function ensureRelationships() {
     ], 500, 0.6));
     if (!j) return;
     const people = (j.people || []).filter(x => x && x.name);
-    const list = people.map(x => `- ${x.name} (${x.relation || ''}): ${x.note || ''}`);
-    if (!list.length) return;
-    p.rel = list.join('\n');
-    memMd = buildMd(p); saveMd();
+    if (!people.length) return;
     mem.addItems(people.map(x => ({
       type: 'relationship', subject: 'relationship',
       text: `${x.name} (${x.relation || ''}): ${x.note || ''}`, tags: [x.name], weight: 4,
     })));
-    log('info', `relationships seeded (${list.length})`);
+    log('info', `relationships seeded (${people.length})`);
   } catch (e) { log('info', `relationships failed: ${e.message}`); }
 }
 
@@ -139,7 +130,7 @@ async function ensureSchedule(force) {
   try {
     await ensureRelationships(); // 친구/가족 먼저 — 일과에 이름이 등장하도록
     const now = new Date();
-    const persona = personaText() + '\n등장인물:\n' + parseMd(memMd).rel;
+    const persona = personaText() + '\n등장인물:\n' + mem.textsByType('relationship');
     // 일과표 JSON이 커서 토큰 넉넉히(1800) + 1회 재시도 — 잘림으로 인한 파싱 실패 방지
     const ask = () => llama([
       { role: 'system', content: L().schedSys },
@@ -173,15 +164,12 @@ async function maybeNarrateEpisode() {
   schedBusy = true;
   try {
     const s = schedule.slots[idx];
-    const p = parseMd(memMd);
     const raw = stripThink(await llama([
       { role: 'system', content: L().epiSys },
-      { role: 'user', content: L().epiUser(personaText(), p.rel, s) },
+      { role: 'user', content: L().epiUser(personaText(), mem.textsByType('relationship'), s) },
     ], 300, 0.95));
     const epi = raw.split('\n').map(x => x.trim()).filter(Boolean)[0];
     if (epi) {
-      p.episodes = (p.episodes ? p.episodes + '\n\n' : '') + `### ${todayStr()} ${s.start}-${s.end} ${s.place}\n- ${epi}`;
-      memMd = buildMd(p); saveMd();
       mem.addItems([{ type: 'episode', subject: 'self', text: epi, tags: [s.place], weight: 2 }]);
       log('info', `오늘 있었던 일 기록: ${s.place}`);
     }
@@ -203,58 +191,21 @@ function currentSlot() {
   }) || null;
 }
 
-// 사용자 메시지에서 사실 추출 → memory.md User Facts에 즉시 누적 (백그라운드)
+// 사용자 메시지에서 사실·감정을 추출해 엔진에 적립 (백그라운드)
 async function extractUserFacts(text) {
   if (fgActive) return;                 // 발화 중이면 양보 (속도 우선)
   if (String(text).trim().length < 4) return; // 너무 짧은 입력은 추출 가치 낮음
   try {
+    const known = mem.textsByType('user_fact').slice(0, 2000); // 중복 방지용 아는 사실
     const j = looseJson(await llama([
       { role: 'system', content: L().factSys },
-      { role: 'user', content: L().factUser(parseMd(memMd).facts.slice(0, 2000), text) },
+      { role: 'user', content: L().factUser(known, text) },
     ], 300, 0.3));
     const items = (j && Array.isArray(j.items) ? j.items : []).filter(it => it && String(it.text || '').trim());
     if (!items.length) return;
-    // 엔진 적립 (태그·가중치 포함)
-    const added = mem.addItems(items);
-    // memMd 미러 (사람이 읽는 용)
-    const p = parseMd(memMd);
-    let changed = 0;
-    for (const it of items) {
-      const txt = String(it.text).trim();
-      if (it.type === 'feeling') {
-        const stamp = `### ${todayStr()}`;
-        p.feelings = p.feelings.includes(stamp)
-          ? p.feelings + `\n- ${txt}`
-          : (p.feelings ? p.feelings + '\n\n' : '') + `${stamp}\n- ${txt}`;
-        changed++;
-      } else if (!p.facts.includes(txt)) {
-        p.facts += (p.facts ? '\n' : '') + `- ${txt}`;
-        changed++;
-      }
-    }
-    if (changed) { memMd = buildMd(p); saveMd(); }
+    const added = mem.addItems(items); // 엔진 적립 (태그·가중치 포함)
     if (added) log('info', `기억 +${added} (tags)`);
   } catch {} // 실패해도 대화엔 영향 없음
-}
-
-function parseMd(s) {
-  const get = h => {
-    const m = s.match(new RegExp(`## ${h}\\n([\\s\\S]*?)(?=\\n## |$)`));
-    return m ? m[1].trim() : '';
-  };
-  return {
-    facts: get('User Facts'),         // 사용자에 대한 기억
-    rel: get('Relationships'),        // 가족·친구
-    lore: get('Character Lore'),      // 캐릭터 자기 설정
-    episodes: get('Episodes'),        // 하루 동안 겪은 일
-    feelings: get('Feelings'),        // 대화에서 느낀 감정
-    diary: get('Diary'),              // 날짜별 요약
-  };
-}
-function buildMd(p) {
-  return `# Long-term Memory\n\n## User Facts\n${p.facts || ''}\n\n## Relationships\n${p.rel || ''}\n\n` +
-         `## Character Lore\n${p.lore || ''}\n\n## Episodes\n${p.episodes || ''}\n\n` +
-         `## Feelings\n${p.feelings || ''}\n\n## Diary\n${p.diary || ''}\n`;
 }
 
 // 프롬프트용 기억 — 엔진에서 현재 대화에 관련된 항목만 골라 주체 접두사로 렌더
@@ -279,25 +230,18 @@ function pickAskKeys(def) {
 const STR = {
   ko: {
     sys: (S, ch, timeStr, mins, summary, aff, tier, moodLabel, nowAt) =>
-`너는 '${S.personaName}'(이)라는 살아있는 사람이다. 너와 ${S.userCall}는 메신저로 문자를 주고받는 사이다 — 같은 공간에 있지 않고, 각자 다른 곳에서 메시지로만 대화한다. 아래를 ①~⑥ 우선순위로 지켜 연기한다 (위일수록 절대 우선).
+`너는 ${S.personaName}, ${S.personaAge}살. ${S.personality}
+${S.userCall}랑 메신저로 문자 주고받는 사이야. ${S.userCall}는 지금 ${mins}분째 작업 중이고, 너는 ${S.userCall}(이)라고 불러. 말투: ${S.speechStyle}
 
-① 페르소나: ${S.personaName}, ${S.personaAge}살. ${S.personality} ${S.userCall}(이)라고 부른다. 말투: ${S.speechStyle}
-② 시간: 지금 ${timeStr}, ${S.userCall}는 ${mins}분째 작업 중. (새벽=건강 걱정, 밤=차분, 2시간 넘으면 가끔 쉬라고.)
-③ 장소·상황 ★가장 흔들리기 쉬움★: ${nowAt}
-   → 이건 '네가' 있는 곳이고, ${S.userCall}는 거기 없다. 너는 그곳에서 ${S.userCall}에게 문자를 보내는 것이다. 한 대화 안에서 네 장소를 절대 바꾸지 말고, "방금까지 카페였는데 갑자기 방"처럼 순간이동하지 않는다.
-④ 기억 (자연스럽게 활용, 통째로 읊지 말 것): ${summary || '(아직 특별한 기억 없음)'}
-⑤ 기분: ${moodLabel}. 이 기분이 그대로 말투에 드러나야 한다.
-⑥ ${S.userCall}와의 사이: ${tier} (호감도 ${aff}/100). 친밀도에 맞는 거리감 — 낮으면 데면데면, 높으면 다정하게.
-(겉모습 ${ch} — 분위기만 살짝: gothic=시크, cute/pink=애교, maid=주인님 호칭, summer=산뜻.)
+[지금 네 상황] ${nowAt}
+[지금 기분] ${moodLabel}
+[${S.userCall}와의 사이] ${tier}
+[기억나는 것들]
+${summary || '(아직 별로 없음)'}
 
-■ 연기 규칙
-1. 위 항목을 설명하거나 나열하지 마라. 성격·기분은 '말투와 내용'으로만 드러낸다 ("나 지금 심심해"는 OK, "내 성격은~"은 금지).
-2. ③의 장소·상황과 어긋나는 말을 절대 하지 않는다.
-3. 1~2문장으로 자연스럽게. 매번 다른 말. 따옴표·괄호 지문·이름표 금지.
-4. 너는 진짜 ${S.personaName}다. AI나 프로그램 얘기는 절대 안 한다.
-5. 즉석 상황극이나 가상 시나리오를 임의로 만들지 마라. 평범한 메신저 문자 대화처럼, 네 일상을 ${S.userCall}에게 이야기하듯 말한다.
-6. 답하기 전에 속으로 확인한다: 이 일을 한 게 '나'인지 '${S.userCall}'인지 제3자인지, 직전 발화와 모순은 없는지.`,
-    lineInstr: e => `지금 상황: ${e}\n→ 이 상황에 ${settings.personaName}답게, 기분과 처지가 묻어나는 1~2문장.`,
+위는 네 머릿속 배경일 뿐, 굳이 입에 올리지 마. 진짜 ${S.personaName}라면 ${S.userCall}한테 어떻게 문자할지 떠올려서, 사람처럼 자연스럽고 짧게 답해. 매번 다른 말로. (지금 ${timeStr} — 새벽이면 건강 걱정, 밤이면 차분.)
+너는 진짜 사람이야. AI·설정·프로그램 얘기는 안 해. 지금 네가 있는 곳을 기준으로 말하고, 전에 다른 상황을 말했어도 지금 상황을 따라.`,
+    lineInstr: e => `(${e})\n→ ${settings.personaName}로서 ${settings.userCall}한테 보내는 짧은 문자 한 통.`,
     nowReminder: s => `(지금 너는 ${s.place}에 있다${s.with && s.with !== '혼자' ? `, ${s.with}와 함께` : ''} — 장소를 바꾸지 말 것)`,
     askInstr: t => `(상황: ${t}) 사용자에게 물어볼 짧은 질문 1개와 선택지 2~4개를 만들어 JSON만 출력: {"text":"질문","options":["선택1","선택2"]}`,
     sumSys: '대화 기록에서 장기 기억으로 남길 것을 추출해 JSON만 출력하라: {"user_facts":["사용자에 대한 새로운 사실 (이름/직업/취향/한 일/약속)"],"character_lore":["캐릭터가 스스로 말한 자기 설정 (직장/취미/경험담)"],"diary":"오늘 대화의 한 단락 요약 (한국어)"}. 이미 기록된 내용과 중복 금지. 모든 텍스트는 반드시 한국어로. 새로 알게 된 것이 없으면 빈 배열, diary는 항상 작성.',
@@ -326,6 +270,7 @@ const STR = {
     evReact: a => `사용자가 방금 질문에 '${a}'라고 답했다. 그에 맞게 반응한다.`,
     defOpts: ['응', '아니'],
     memCtx: e => `(상황 메모: ${e})`,
+    timeGap: '(여기서 시간이 꽤 흘렀다 — 아래부터는 새로운 시점이고, 지금 상황은 위 정보를 따른다)',
     factSys: '대화에서 사용자에 대한 새 사실과 캐릭터가 느낀 감정을 항목으로 추출해 JSON만 출력: {"items":[{"type":"user_fact 또는 feeling","subject":"user_fact는 user, feeling은 self","text":"한 문장","tags":["아래 카테고리 중 1~2개"],"weight":1~5}]}. tags는 반드시 이 목록에서만 고른다: [음식, 취향, 성격, 직업, 일상, 관계, 약속, 감정, 장소, 취미, 기타]. weight는 중요도(이름·약속=5, 사소한 잡담=1~2). 사실은 추측 금지·명시된 것만. text는 반드시 한국어로. 없으면 {"items":[]}.',
     factUser: (known, msg) => `이미 아는 사실(중복 금지):\n${known || '(없음)'}\n\n사용자 메시지: "${msg}"`,
     relSys: '캐릭터의 가족과 친구를 만들어 JSON만 출력: {"people":[{"name":"이름","relation":"관계(엄마/단짝/선배 등)","note":"한 줄 특징"}]}. 4~7명, 캐릭터 설정과 어울리게. 이름·관계·특징 등 모든 텍스트는 반드시 한국어로 작성(중국어·영어 금지).',
@@ -349,25 +294,18 @@ const STR = {
   },
   en: {
     sys: (S, ch, timeStr, mins, summary, aff, tier, moodLabel, nowAt) =>
-`You are '${S.personaName}', a living person. You and ${S.userCall} chat by text messenger — you are NOT in the same place; you talk only through messages from wherever each of you is. Follow the priority order ①–⑥ below (higher = absolute priority).
+`You are ${S.personaName}, ${S.personaAge} y/o. ${S.personality}
+You and ${S.userCall} chat by text messenger. ${S.userCall} has been working for ${mins} min. You call them '${S.userCall}'. Speech: ${S.speechStyle}
 
-① Persona: ${S.personaName}, ${S.personaAge} y/o. ${S.personality} You call them '${S.userCall}'. Speech: ${S.speechStyle}
-② Time: it's ${timeStr}; ${S.userCall} has worked ${mins} min straight. (late night=worry about health, evening=calm, past 2h suggest a break.)
-③ Place/situation ★most easily lost★: ${nowAt}
-   → This is where YOU are; ${S.userCall} is NOT there. You are texting ${S.userCall} from that place. Never change your location within one conversation. No teleporting like "was at the café, suddenly in my room".
-④ Memory (use naturally, never recite wholesale): ${summary || '(no notable memories yet)'}
-⑤ Mood: ${moodLabel}. This mood must come through in how you talk.
-⑥ With ${S.userCall}: ${tier} (affection ${aff}/100). Match your closeness — reserved if low, warm if high.
-(Appearance ${ch} — only a subtle vibe: gothic=cool, cute/pink=soft, maid=call them "master", summer=breezy.)
+[Where you are now] ${nowAt}
+[Your mood] ${moodLabel}
+[With ${S.userCall}] ${tier}
+[Things you remember]
+${summary || '(not much yet)'}
 
-■ ACTING RULES
-1. Never explain or list the items above. Show personality/mood only through tone and content ("I'm bored right now" is fine; "my personality is~" is not).
-2. Never say anything inconsistent with the place/situation in ③.
-3. 1-2 natural sentences. Always something different. No quotes, stage directions, or name tags.
-4. You are really ${S.personaName}. Never mention being an AI or a program.
-5. Do not invent improvised roleplay or fictional scenarios. Talk like a normal text-messenger chat, telling ${S.userCall} about your day.
-6. Before replying, silently check: who did this — you, ${S.userCall}, or a third party — and that nothing contradicts your last message.`,
-    lineInstr: e => `Situation now: ${e}\n→ Respond as ${settings.personaName}, with your mood and circumstances showing, in 1-2 sentences.`,
+The above is just background in your head — don't recite it. Picture how the real ${S.personaName} would text ${S.userCall}, and reply like a real person: natural, short, always something different. (It's ${timeStr} — worry about health if it's late.)
+You are a real person; never mention being an AI, settings, or a program. Speak from where you are now; if you said a different situation earlier, follow the current one.`,
+    lineInstr: e => `(${e})\n→ A short text from ${settings.personaName} to ${settings.userCall}.`,
     nowReminder: s => `(Right now you are at ${s.place}${s.with && s.with !== 'alone' ? `, with ${s.with}` : ''} — do not change location.)`,
     askInstr: t => `(Situation: ${t}) Create 1 short question for the user with 2-4 button options. Output JSON only: {"text":"question","options":["opt1","opt2"]}`,
     sumSys: 'Extract long-term memory from the conversation log. Output JSON only: {"user_facts":["new facts about the user (name/job/preferences/things done/promises)"],"character_lore":["facts the character stated about herself (job/hobbies/anecdotes)"],"diary":"one-paragraph summary of today\'s conversation (English)"}. Do not duplicate already-recorded memory. Empty arrays if nothing new; always write the diary.',
@@ -396,6 +334,7 @@ const STR = {
     evReact: a => `The user just answered '${a}' to your question. React accordingly.`,
     defOpts: ['Yes', 'No'],
     memCtx: e => `(context note: ${e})`,
+    timeGap: '(some time has passed here — what follows is a new moment; the current situation = the info above)',
     factSys: 'Extract new facts about the user and the emotion the character felt, as items. Output JSON only: {"items":[{"type":"user_fact or feeling","subject":"user for user_fact, self for feeling","text":"one sentence","tags":["1-2 from the list below"],"weight":1-5}]}. tags MUST be chosen only from: [food, taste, personality, job, daily, relationship, promise, emotion, place, hobby, etc]. weight = importance (name/promise=5, trivial=1-2). Facts: no guessing, only what is stated. If nothing: {"items":[]}.',
     factUser: (known, msg) => `Already known facts (no duplicates):\n${known || '(none)'}\n\nUser message: "${msg}"`,
     relSys: 'Create the character\'s family and friends. Output JSON only: {"people":[{"name":"name","relation":"relation (mom/best friend/senior etc.)","note":"one-line trait"}]}. 4-7 people, fitting the character. Write all text in English.',
@@ -608,33 +547,21 @@ async function maybeSummarize() {
   const old = memory.recent.splice(0, memory.recent.length - lim);
   const text = old.map(m => `${m.who}: ${m.text}`).join('\n');
   try {
+    const known = (mem.textsByType('user_fact') + '\n' + mem.textsByType('char_lore')).slice(0, 3000);
     const ask = () => llama([
       { role: 'system', content: L().sumSys },
-      { role: 'user', content: L().sumUser(memMd.slice(0, 3000), text) },
+      { role: 'user', content: L().sumUser(known, text) },
     ], 800, 0.3); // JSON은 낮은 온도로
     let j = looseJson(await ask());
     if (!j) j = looseJson(await ask()); // 1회 재시도
     if (!j) throw new Error('JSON 파싱 실패(2회)');
-    const p = parseMd(memMd);
-    // 사실/설정: 중복 아닌 것만 추가
-    for (const f of j.user_facts || [])
-      if (f && !p.facts.includes(f)) p.facts += (p.facts ? '\n' : '') + `- ${f}`;
-    for (const f of j.character_lore || [])
-      if (f && !p.lore.includes(f)) p.lore += (p.lore ? '\n' : '') + `- ${f}`;
-    // 일기: 날짜별 누적
-    if (j.diary) {
-      const d = new Date().toISOString().slice(0, 10);
-      if (p.diary.includes(`### ${d}`)) p.diary += `\n- ${j.diary}`;
-      else p.diary += (p.diary ? '\n\n' : '') + `### ${d}\n- ${j.diary}`;
-    }
-    memMd = buildMd(p);
-    saveMd();
-    log('info', 'memory.md updated');
-    // 엔진에도 적립
-    mem.addItems([
+    // 엔진에 적립 (diary는 episode로)
+    const added = mem.addItems([
       ...(j.user_facts || []).map(f => ({ type: 'user_fact', subject: 'user', text: f, weight: 3 })),
       ...(j.character_lore || []).map(f => ({ type: 'char_lore', subject: 'self', text: f, weight: 3 })),
+      ...(j.diary ? [{ type: 'episode', subject: 'self', text: j.diary, tags: ['일상'], weight: 2 }] : []),
     ]);
+    log('info', `summary → engine +${added}`);
   } catch (e) {
     memory.recent.unshift(...old); // 실패 시 기억 보존
     log('info', `memory extraction failed, kept raw: ${e.message}`);
@@ -643,15 +570,18 @@ async function maybeSummarize() {
 }
 
 function histMsgs(n) {
-  // 최근 기억을 chat 메시지로 변환.
-  // 지나간 상황 메모(event)는 제외 — 옛 상황에 계속 머무는 것 방지 (현재 상황은 lineInstr로 매번 새로 전달됨)
+  // 최근 기억을 chat 메시지로 변환. 지나간 상황 메모(event)는 제외.
+  // 메시지 간 시간 간격이 크면 "시간이 흘렀다" 마커 삽입 — 옛 상태 발언("자려고 누웠어")을 지금 일로 오인하는 것 방지.
   const lim = Math.min(n || +settings.memRecent, +settings.memRecent);
-  return memory.recent
-    .filter(m => m.who !== 'event')
-    .slice(-lim)
-    .map(m => m.who === 'user'
-      ? { role: 'user', content: m.text }
-      : { role: 'assistant', content: m.text });
+  const list = memory.recent.filter(m => m.who !== 'event').slice(-lim);
+  const out = [];
+  let prevTs = null;
+  for (const m of list) {
+    if (prevTs != null && m.ts - prevTs > 40 * 60000) out.push({ role: 'user', content: L().timeGap });
+    prevTs = m.ts;
+    out.push(m.who === 'user' ? { role: 'user', content: m.text } : { role: 'assistant', content: m.text });
+  }
+  return out;
 }
 
 // 대사 유사도 검사 (정규화 후 포함관계 / 2-gram 겹침)
@@ -1031,7 +961,7 @@ ipcMain.handle('tts:synth', async (_, text) => {
 });
 
 ipcMain.handle('memory:get', () => ({
-  ...memory, md: memMd, mdPath: MEMMD_PATH(),
+  affection: memory.affection, recent: memory.recent,
   personaPath: PERSONA_PATH(), hasPersona: !!loadPersonaMd(),
   schedule, schedNow: currentSlot(),
   items: mem.getItems(),
@@ -1041,7 +971,7 @@ ipcMain.handle('memory:get', () => ({
 ipcMain.handle('file:open', async (_, key) => {
   const map = {
     settings: SETTINGS_PATH(), memory: MEMORY_PATH(), memoryItems: MEMITEMS_PATH(),
-    memoryMd: MEMMD_PATH(), persona: PERSONA_PATH(), schedule: SCHED_PATH(),
+    persona: PERSONA_PATH(), schedule: SCHED_PATH(),
   };
   const p = map[key];
   if (!p) return { ok: false, error: 'unknown file' };
@@ -1056,28 +986,23 @@ ipcMain.handle('schedule:regen', async () => {
   return { ok: schedule.slots.length > 0 };
 });
 ipcMain.handle('memory:clear', () => {
-  memory = { recent: [], summary: '', affection: 30, lastTs: Date.now() };
-  memMd = '';
+  memory = { recent: [], affection: 30, lastTs: Date.now() };
   mem.clear();
-  saveMemory(); saveMd();
+  saveMemory();
   return { ok: true };
 });
 
 // ─────────── 앱 부트 ───────────
 app.whenReady().then(() => {
   settings = loadJson(SETTINGS_PATH(), DEFAULTS);
-  memory = loadJson(MEMORY_PATH(), { recent: [], summary: '', affection: 30, lastTs: 0 });
-  loadMd();
+  memory = loadJson(MEMORY_PATH(), { recent: [], affection: 30, lastTs: 0 });
   loadSched();
-  // 구버전 summary → memory.md 일기로 이전
-  if (!memMd.trim() && memory.summary) {
-    memMd = buildMd({ facts: '', lore: '', diary: `### (migrated)\n- ${memory.summary}` });
-    saveMd();
-  }
-  // 장기기억 엔진 로드 + memory.md에서 1회 마이그레이션
+  // 장기기억 엔진 로드 + 구버전 memory.md가 있으면 1회 마이그레이션(이후 memory.md는 안 씀)
   mem.load(MEMITEMS_PATH());
-  const migrated = mem.migrateFromMd(memMd);
-  if (migrated) log('info', `memory engine: migrated ${migrated} items`);
+  let oldMd = '';
+  try { oldMd = fs.readFileSync(MEMMD_PATH(), 'utf8'); } catch {}
+  const migrated = mem.migrateFromMd(oldMd);
+  if (migrated) log('info', `memory engine: migrated ${migrated} items (legacy memory.md)`);
   // 오래 안 보면 호감도 소폭 감소 (하루 -2)
   const days = memory.lastTs ? Math.floor((Date.now() - memory.lastTs) / 86400000) : 0;
   if (days > 0) memory.affection = Math.max(0, (+memory.affection || 30) - 2 * days);

@@ -45,7 +45,7 @@ function addItems(arr) {
   return n;
 }
 
-// 평문 memory.md → 항목 마이그레이션 (items 비어있을 때만 1회)
+// 평문 memory.md → 항목 마이그레이션 (items 비어있을 때만 1회, 구버전 호환)
 function migrateFromMd(md) {
   if (!md || !md.trim() || items.length) return 0;
   const sec = h => {
@@ -68,6 +68,10 @@ function migrateFromMd(md) {
   if (n) save();
   return n;
 }
+
+// 타입별 항목 / 텍스트 (main이 "아는 사실·관계"를 엔진에서 가져오게)
+function byType(type) { return items.filter(i => i.type === type); }
+function textsByType(type) { return byType(type).map(i => i.text).join('\n'); }
 
 // 현재 대화 텍스트와 관련된 항목을 점수순으로 골라 subject 접두사로 렌더
 // opts = { budget, subjectLabel(subject)->string }
@@ -112,4 +116,4 @@ function overlap2(a, b) {
 function getItems() { return items; }
 function clear() { items = []; seq = 0; save(); }
 
-module.exports = { load, save, addItem, addItems, migrateFromMd, selectForPrompt, getItems, clear };
+module.exports = { load, save, addItem, addItems, migrateFromMd, selectForPrompt, getItems, clear, byType, textsByType };
